@@ -13,7 +13,6 @@ except ImportError:
     subprocess.run(["playwright", "install", "chromium"])
     from playwright.sync_api import sync_playwright
 
-# 确保在云端每次启动时，如果内核不存在，强制自动下载一次
 @st.cache_resource(show_spinner=False)
 def install_playwright_browser():
     try:
@@ -290,6 +289,10 @@ def run_automation_web(username, password, report_type, start_date, end_date, cl
             return reports_dict
 
         except Exception as err:
+            try:
+                page.screenshot(path="error.png")
+            except:
+                pass
             browser.close()
             raise Exception(f"抓取中断，详细原因：{str(err)}")
 
@@ -446,12 +449,5 @@ if submit_button:
                     )
                 else:
                     status.error("⚠️ 未能获取到任何有效数据，请确认输入的账号密码是否正确。")
-except Exception as err:
-            # 💡 加上这行截图代码，出错时把网页画面保存为 error.png
-            try:
-                page.screenshot(path="error.png")
-            except:
-                pass
-            
-            browser.close()
-            raise Exception(f"抓取中断，详细原因：{str(err)}")
+        except Exception as e:
+            status.error(f"❌ 运行遭遇异常：{str(e)}")
