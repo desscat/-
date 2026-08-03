@@ -1,0 +1,39 @@
+name: Daily iRead Report
+
+on:
+  schedule:
+    # ⏱️ 定时触发时间（这里设置的是每天北京时间 21:00 发送）
+    # 注意：GitHub 的时间是 UTC（世界标准时间），北京时间是 UTC+8，所以 21:00 减去 8 小时是 13:00
+    - cron: '0 13 * * *'
+  
+  # 允许你在 GitHub 网页上手动随时点击按钮测试运行
+  workflow_dispatch:
+
+jobs:
+  run-task:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 迁源码
+        uses: actions/checkout@v4
+
+      - name: 设置 Python 环境
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+          cache: 'pip'
+
+      - name: 安装依赖包
+        run: |
+          pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install apscheduler requests playwright
+
+      - name: 安装 Playwright 浏览器内核
+        run: playwright install chromium
+
+      - name: 运行自动抓取并推送脚本
+        env:
+          IREAD_USER: ${{ secrets.IREAD_USER }}
+          IREAD_PWD: ${{ secrets.IREAD_PWD }}
+          PUSHPLUS_TOKEN: ${{ secrets.PUSHPLUS_TOKEN }}
+        run: python cron_job.py
