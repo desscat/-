@@ -153,18 +153,8 @@ def run_automation_web(username, password, report_type, start_date, end_date, cl
                 pass
 
             status_placeholder.info("⏳ 正在进入班级列表...")
-            # 确认进入包含“班级管理”的主页面
             page.wait_for_selector("tbody tr", timeout=25000)
             status_placeholder.success("✅ 登录成功！开始抓取数据...")
-
-            if report_type == "今日汇报":
-                date_title = datetime.now().strftime("%m月%d日")
-            elif report_type == "周汇报":
-                date_title = "本周"
-            elif report_type == "月汇报":
-                date_title = "本月"
-            else:
-                date_title = f"{start_date.strftime('%Y-%m-%d')} 至 {end_date.strftime('%Y-%m-%d')}"
 
             rows = page.query_selector_all("tbody tr")
             class_count = len(rows)
@@ -193,13 +183,17 @@ def run_automation_web(username, password, report_type, start_date, end_date, cl
                     stat_btn.click()
                     page.wait_for_timeout(3000)
                     
-                    # --- 周期切换 ---
-                    if report_type in ["今日汇报", "周汇报", "月汇报"]:
+                    # --- 周期或自定义日期切换 ---
+                    if report_type in ["周汇报", "月汇报"]:
+                        date_title = "本周" if report_type == "周汇报" else "本月"
                         tab_elem = page.query_selector(f"text={report_type}")
                         if tab_elem:
                             tab_elem.click()
                             page.wait_for_timeout(3000)
-                    elif report_type == "自定义":
+                    else:
+                        # 针对“今日汇报”或“自定义”，强制走自定义时间框筛选，保证能稳稳拿到指定日期（如昨天）
+                        date_title = f"{start_date.strftime('%m月%d日')}"
+                        
                         custom_tab = page.query_selector("text=自定义")
                         if custom_tab:
                             custom_tab.click()
