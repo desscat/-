@@ -9,7 +9,6 @@ st.set_page_config(page_title="全阅读学情打卡生成器", page_icon="⚡",
 
 st.title("⚡ 全阅读学情打卡生成器")
 
-# 默认的 DIY 模板样式
 default_template = """[以下为{date_title}的打卡情况]
 
 🏆 {class_name}
@@ -23,7 +22,6 @@ default_template = """[以下为{date_title}的打卡情况]
 ⏰【该起床打卡啦】
 {zeros}"""
 
-# Session 状态安全初始化
 if "class_rules" not in st.session_state:
     st.session_state.class_rules = {}
 
@@ -119,7 +117,6 @@ def auto_login(username, password):
         resp = requests.post(login_url, json=payload, headers=headers, timeout=20)
         if resp.status_code == 200:
             res = resp.json()
-            # 严格对应你截图中 data 里面的 token
             data = res.get("data")
             if isinstance(data, dict):
                 token = data.get("token")
@@ -139,7 +136,8 @@ def fetch_data_via_api(auth_token, report_type, start_date, end_date, class_rule
     reports_dict = {}
 
     try:
-        classes_url = "https://v2.ireadabc.com/api/v3/reports/classes/all" 
+        # 使用抓包确认的正确接口
+        classes_url = "https://v2.ireadabc.com/api/teacher/classes/page/all" 
         resp = requests.get(classes_url, headers=headers, timeout=20)
         
         if resp.status_code != 200:
@@ -147,9 +145,11 @@ def fetch_data_via_api(auth_token, report_type, start_date, end_date, class_rule
             
         res_json = resp.json()
         classes_data = res_json.get("data", [])
+        if isinstance(classes_data, dict):
+            classes_data = classes_data.get("list", []) or classes_data.get("classes", [])
 
         if not classes_data:
-            return None, "当前账号获取到的班级列表为空，可能是账号错误或该账号下无管理班级。"
+            return None, "当前账号获取到的班级列表为空，可能是账号下无管理班级。"
 
         days_count = 1
         if report_type == "昨日汇报":
@@ -232,7 +232,6 @@ def fetch_data_via_api(auth_token, report_type, start_date, end_date, class_rule
 # ==================== 4. 界面展示 ====================
 st.subheader("1. 身份凭证与时间选择")
 
-# 重置按钮
 if st.button("🧹 清空当前凭证缓存", type="secondary"):
     st.session_state.token = ""
     st.session_state.class_rules = {}
@@ -320,7 +319,6 @@ submit_button = st.button("⚡ 一键生成所有班级打卡报告", type="prim
 if submit_button:
     final_token = ""
     
-    # 如果在 Tab 1 填了手机号和密码，直接通过登录接口换取新 Token
     if username_input and password_input:
         with st.spinner("🔑 正在通过账号密码自动登录获取新凭证..."):
             login_token, login_err = auto_login(username_input, password_input)
@@ -330,11 +328,10 @@ if submit_button:
             else:
                 final_token = login_token
     else:
-        # 否则使用 Tab 2 的 Token
         final_token = st.session_state.token
 
     if not final_token:
-        st.warning("⚠️ 请在上方“账号密码登录”标签页输入手机号和密码，或在“Token 凭证”标签页输入 Token！")
+        st.warning("⚠️ 请在上方输入手机号密码或 Token！")
     else:
         with st.spinner("⚡ 正在获取对应账号的全阅读打卡数据..."):
             reports, err = fetch_data_via_api(
