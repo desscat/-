@@ -446,5 +446,12 @@ if submit_button:
                     )
                 else:
                     status.error("⚠️ 未能获取到任何有效数据，请确认输入的账号密码是否正确。")
-        except Exception as e:
-            status.error(f"❌ 运行遭遇异常：{str(e)}")
+except Exception as err:
+            # 💡 加上这行截图代码，出错时把网页画面保存为 error.png
+            try:
+                page.screenshot(path="error.png")
+            except:
+                pass
+            
+            browser.close()
+            raise Exception(f"抓取中断，详细原因：{str(err)}")
