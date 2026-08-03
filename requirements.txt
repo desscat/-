@@ -1,5 +1,4 @@
 streamlit
-streamlit-localstorage
 playwright
 pandas
 requests
