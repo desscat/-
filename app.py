@@ -100,7 +100,7 @@ def generate_markdown(class_name, date_title, student_list, req_listen, req_anim
 {zeros_formatted}
 """
 
-# ==================== 3. 核心抓取逻辑（返回班级报告列表） ====================
+# ==================== 3. 核心抓取逻辑 ====================
 def run_automation_web(username, password, report_type, start_date, end_date, class_rules_config, name_maps_config, default_rule, status_placeholder):
     login_url = "https://v2.ireadabc.com/#/admin/classes/index"
     reports_dict = {}
@@ -141,7 +141,6 @@ def run_automation_web(username, password, report_type, start_date, end_date, cl
                 login_button.click()
                 page.wait_for_timeout(2000)
 
-            # 关掉隐私/协议弹窗
             try:
                 modal_agree_btn = page.query_selector(".el-message-box .el-button--primary, .el-dialog .el-button--primary")
                 if modal_agree_btn:
@@ -183,7 +182,6 @@ def run_automation_web(username, password, report_type, start_date, end_date, cl
                     stat_btn.click()
                     page.wait_for_timeout(3000)
                     
-                    # --- 周期或自定义日期切换 ---
                     if report_type in ["周汇报", "月汇报"]:
                         date_title = "本周" if report_type == "周汇报" else "本月"
                         tab_elem = page.query_selector(f"text={report_type}")
@@ -228,7 +226,6 @@ def run_automation_web(username, password, report_type, start_date, end_date, cl
                             pass
                         page.wait_for_timeout(3000)
 
-                    # 显式等待学生名单数据表出现
                     page.wait_for_selector("tbody tr", timeout=15000)
                     student_rows = page.query_selector_all("tbody tr")
                     students_data = []
@@ -248,7 +245,6 @@ def run_automation_web(username, password, report_type, start_date, end_date, cl
                                 "books": s_books
                             })
                     
-                    # 规则匹配
                     matched_rule = None
                     matched_name_map = ""
                     
@@ -375,9 +371,9 @@ with col_right:
             st.session_state.name_maps = config_data.get("maps", {})
             st.success("✅ 配置恢复成功！")
         except Exception:
-            st.error("导入失败，文件格式有误。")
+            st.error("导入失败，文件格式有误.")
 
-# ==================== 5. 执行逻辑（分班级独立展示与复制） ====================
+# ==================== 5. 执行逻辑（增加显式复制组件） ====================
 if submit_button:
     if not user_input or not pwd_input:
         st.warning("⚠️ 请先填写账号和密码！")
@@ -393,21 +389,27 @@ if submit_button:
                 if reports_dict:
                     status.success(f"🎉 成功获取 {len(reports_dict)} 个班级的打卡报告！")
                     st.divider()
-                    st.subheader("📋 各班级独立打卡报告（可单独查看与复制）")
+                    st.subheader("📋 各班级独立打卡报告")
                     
                     for c_name, c_content in reports_dict.items():
                         with st.container():
-                            st.markdown(f"### 📍 班级：`{c_name}`")
-                            st.text_area(f"点击右上方即可复制 - {c_name}", value=c_content, height=220, key=f"area_{c_name}")
+                            st.markdown(f"### 📍 班级：{c_name}")
+                            st.text_area("文本内容", value=c_content, height=220, key=f"area_{c_name}", label_visibility="collapsed")
                             
-                            c_file_name = f"{datetime.now().strftime('%Y-%m-%d')}_{c_name}_打卡反馈.md"
-                            st.download_button(
-                                label=f"📥 下载【{c_name}】Markdown报告",
-                                data=c_content,
-                                file_name=c_file_name,
-                                mime="text/markdown",
-                                key=f"dl_{c_name}"
-                            )
+                            # 增加显式复制和下载按钮并排显示
+                            btn_col1, btn_col2 = st.columns(2)
+                            with btn_col1:
+                                st.code(c_content, language=None) # 利用代码块自带的清晰一键复制按钮
+                            with btn_col2:
+                                c_file_name = f"{datetime.now().strftime('%Y-%m-%d')}_{c_name}_打卡反馈.md"
+                                st.download_button(
+                                    label=f"📥 下载【{c_name}】Markdown报告",
+                                    data=c_content,
+                                    file_name=c_file_name,
+                                    mime="text/markdown",
+                                    key=f"dl_{c_name}",
+                                    use_container_width=True
+                                )
                             st.markdown("---")
                     
                     all_text = "\n\n" + ("=" * 40) + "\n\n".join(reports_dict.values())
@@ -415,7 +417,8 @@ if submit_button:
                         label="📦 一键打包下载所有班级报告 (Markdown)",
                         data=all_text,
                         file_name=f"{datetime.now().strftime('%Y-%m-%d')}_全部班级打卡反馈.md",
-                        mime="text/markdown"
+                        mime="text/markdown",
+                        use_container_width=True
                     )
                 else:
                     status.error("⚠️ 未能获取到任何有效数据，请确认输入的账号密码是否正确。")
