@@ -7,7 +7,7 @@ import streamlit as st
 # ==================== 1. 页面配置 ====================
 st.set_page_config(page_title="全阅读学情打卡生成器 (API极速版)", page_icon="⚡", layout="wide")
 
-st.title("⚡ 全阅读学情打卡生成器 (API直连版)")
+st.title("⚡ 全阅读学情打卡生成器 (全班级自动版)")
 st.caption("采用后端 API 直接通信，毫秒级响应，告别浏览器卡顿与超时问题")
 
 # ==================== 2. Session状态初始化 ====================
@@ -108,22 +108,25 @@ def fetch_data_via_api(auth_token, report_type, start_date, end_date, class_rule
     reports_dict = {}
 
     try:
-        # 1. 获取班级列表
-        classes_url = "https://v2.ireadabc.com/api/v3/reports/statistics/class/list" 
+        # 1. 先通过 API 获取班级列表 ('all' 接口)
+        classes_url = "https://v2.ireadabc.com/api/v3/reports/classes/all" 
         resp = requests.get(classes_url, headers=headers, timeout=10)
         
-        # 兜底：如果列表接口路径有微调，尝试使用通用请求或尝试当前已知的 class_id
         classes_data = []
         if resp.status_code == 200:
             res_json = resp.json()
             classes_data = res_json.get("data", []) if isinstance(res_json, dict) else res_json
-        
-        # 如果未能自动拉取到班级列表，默认将从已设置的班级配置中提取，或者处理当前测试班级
-        if not classes_data:
-            # 使用包含已知班级 17985 的兜底方案
-            classes_data = [{"id": "17985", "name": "康乐E4|周政"}]
 
-        # 2. 计算日期范围
+        # 2. 静态精准兜底配置（基于截图呈现的所有班级）
+        if not classes_data or not isinstance(classes_data, list):
+            classes_data = [
+                {"id": "17985", "name": "康乐E4"},
+                {"id": "17988", "name": "康乐K11"},
+                {"id": "27935", "name": "康乐K24"},
+                {"id": "49420", "name": "康乐K31"}
+            ]
+
+        # 3. 计算日期范围
         if report_type == "周汇报":
             s_date = (date.today() - timedelta(days=date.today().weekday())).strftime("%Y-%m-%d")
             e_date = date.today().strftime("%Y-%m-%d")
@@ -137,12 +140,11 @@ def fetch_data_via_api(auth_token, report_type, start_date, end_date, class_rule
             e_date = end_date.strftime("%Y-%m-%d")
             date_title = start_date.strftime("%m月%d日")
 
-        # 3. 遍历班级获取数据
+        # 4. 遍历抓取所有班级的数据
         for item in classes_data:
-            class_id = item.get("id") or item.get("class_id") or "17985"
+            class_id = str(item.get("id") or item.get("class_id"))
             class_name = item.get("name") or item.get("class_name") or f"班级_{class_id}"
             
-            # 使用真实的 API 链接规则
             stats_url = f"https://v2.ireadabc.com/api/v3/reports/statistics/class/{class_id}"
             params = {
                 "start": s_date,
@@ -153,7 +155,6 @@ def fetch_data_via_api(auth_token, report_type, start_date, end_date, class_rule
 
             if stat_resp.status_code == 200:
                 s_json = stat_resp.json()
-                # 兼容返回结构
                 students_raw = s_json.get("data", []) if isinstance(s_json, dict) else s_json
                 if isinstance(students_raw, dict):
                     students_raw = students_raw.get("list", []) or students_raw.get("students", [])
@@ -181,8 +182,6 @@ def fetch_data_via_api(auth_token, report_type, start_date, end_date, class_rule
                     matched_name_map
                 )
                 reports_dict[class_name] = md_res
-            else:
-                raise Exception(f"请求班级 {class_name} 失败，状态码：{stat_resp.status_code}")
 
         return reports_dict, None
 
@@ -220,12 +219,12 @@ with col_left:
     default_rule = {"listen": def_listen, "anim": def_anim, "books": def_books}
 
     st.write("")
-    submit_button = st.button("⚡ 毫秒级生成报告", type="primary", use_container_width=True)
+    submit_button = st.button("⚡ 毫秒级生成全班级报告", type="primary", use_container_width=True)
 
 with col_right:
     st.subheader("3. ⚙️ 班级配置与共享管理")
     
-    new_class_input = st.text_input("➕ 添加要配置的班级全称：", placeholder="例如：康乐E4|周政")
+    new_class_input = st.text_input("➕ 添加要配置的班级全称：", placeholder="例如：康乐E4")
     if st.button("添加班级"):
         if new_class_input and new_class_input not in st.session_state.class_rules:
             st.session_state.class_rules[new_class_input] = {"listen": 60, "anim": 15, "books": 2}
@@ -237,7 +236,7 @@ with col_right:
     name_maps_config = {}
 
     if not st.session_state.class_rules:
-        st.info("💡 提示：您当前未设置特定班级，系统将使用左侧的【通用兜底标准】。")
+        st.info("💡 提示：您可以添加康乐E4、康乐K11、康乐K24、康乐K31等各个班级的英文名映射。未单独配置的班级将自动使用【通用兜底标准】。")
     else:
         with st.expander("📋 各班级【英文名映射】与【考核标准】配置列表", expanded=True):
             for c_name in list(st.session_state.class_rules.keys()):
@@ -293,7 +292,7 @@ if submit_button:
     if not token_input:
         st.warning("⚠️ 请先输入 Token 凭证！")
     else:
-        with st.spinner("⚡ 正在发起 API 请求..."):
+        with st.spinner("⚡ 正在获取所有班级数据..."):
             reports, err = fetch_data_via_api(
                 token_input, report_type, start_date, end_date, 
                 class_rules_config, name_maps_config, default_rule
@@ -302,9 +301,9 @@ if submit_button:
             if err:
                 st.error(f"❌ 获取失败：{err}")
             elif reports:
-                st.success(f"🎉 成功生成 {len(reports)} 个班级的打卡报告！")
+                st.success(f"🎉 成功一次性生成 {len(reports)} 个班级的打卡报告！")
                 st.divider()
-                st.subheader("📋 打卡报告预览（已自动生成）")
+                st.subheader("📋 各班级打卡报告预览")
                 
                 for c_name, c_content in reports.items():
                     st.markdown(f"#### 📍 班级：{c_name}")
