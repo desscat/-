@@ -145,12 +145,12 @@ def fetch_data_via_api(auth_token, report_type, start_date, end_date, class_rule
         res_json = resp.json()
         raw_data = res_json.get("data", [])
         
-        # 兼容各种分页及嵌套格式（list, records, 或者直接是数组）
+        # 精准命中 rows、list、records 等各种格式
         classes_data = []
         if isinstance(raw_data, list):
             classes_data = raw_data
         elif isinstance(raw_data, dict):
-            classes_data = raw_data.get("list", []) or raw_data.get("records", []) or raw_data.get("classes", [])
+            classes_data = raw_data.get("rows", []) or raw_data.get("list", []) or raw_data.get("records", []) or raw_data.get("classes", [])
 
         if not classes_data:
             return None, f"获取到的班级列表为空。原始响应: {str(res_json)[:150]}"
@@ -191,8 +191,9 @@ def fetch_data_via_api(auth_token, report_type, start_date, end_date, class_rule
             days_count = 1
 
         for item in classes_data:
-            class_id = str(item.get("id") or item.get("class_id"))
-            class_name = item.get("name") or item.get("class_name") or f"班级_{class_id}"
+            # 兼容 class_id 和 id 字段
+            class_id = str(item.get("class_id") or item.get("id"))
+            class_name = item.get("class_name") or item.get("name") or f"班级_{class_id}"
             
             stats_url = f"https://v2.ireadabc.com/api/v3/reports/statistics/class/{class_id}"
             params = {"start": s_date, "end": e_date}
@@ -202,7 +203,7 @@ def fetch_data_via_api(auth_token, report_type, start_date, end_date, class_rule
                 s_json = stat_resp.json()
                 students_raw = s_json.get("data", []) if isinstance(s_json, dict) else s_json
                 if isinstance(students_raw, dict):
-                    students_raw = students_raw.get("list", []) or students_raw.get("students", []) or students_raw.get("records", [])
+                    students_raw = students_raw.get("rows", []) or students_raw.get("list", []) or students_raw.get("students", []) or students_raw.get("records", [])
 
                 students_data = []
                 for s in students_raw:
