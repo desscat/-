@@ -92,7 +92,7 @@ def process_student_data(class_name, name, listen, anim, books, req_listen, req_
     books = clean_num(books)
     
     clean_name = re.sub(r'[a-zA-Z\s]', '', name)
-    class_mapping = parse_name_map(name_map_str)
+    class_mapping = parse_name_map(map_str=name_map_str)
     eng_name = class_mapping.get(clean_name, class_mapping.get(name, name))
     
     if listen >= req_listen and anim >= req_anim and books >= req_books:
@@ -130,7 +130,6 @@ def generate_custom_report(template_str, class_name, date_title, student_list, r
     mids_formatted = "\n\n".join(mids) if mids else "（无）"
     zeros_formatted = "\n\n".join(zeros) if zeros else "（无）"
     
-    # 按照用户的 DIY 模板进行占位符替换
     return template_str.format(
         class_name=class_name,
         date_title=date_title,
@@ -180,22 +179,29 @@ def fetch_data_via_api(auth_token, report_type, start_date, end_date, class_rule
                 {"id": "49420", "name": "康乐K31"}
             ]
 
-        if report_type == "周汇报":
+        # 确切日期计算（不出现模糊词汇）
+        if report_type == "昨日汇报":
+            yest = date.today() - timedelta(days=1)
+            s_date = yest.strftime("%Y-%m-%d")
+            e_date = s_date
+            date_title = yest.strftime("%m月%d日")
+        elif report_type == "周汇报":
             s_date = (date.today() - timedelta(days=date.today().weekday())).strftime("%Y-%m-%d")
             e_date = date.today().strftime("%Y-%m-%d")
-            date_title = "本周"
+            date_title = f"{s_date}至{e_date}"
         elif report_type == "月汇报":
             s_date = date.today().replace(day=1).strftime("%Y-%m-%d")
             e_date = date.today().strftime("%Y-%m-%d")
-            date_title = "本月"
+            date_title = f"{s_date}至{e_date}"
         elif report_type == "自定义时间":
             s_date = start_date.strftime("%Y-%m-%d")
             e_date = end_date.strftime("%Y-%m-%d")
             date_title = f"{s_date}至{e_date}" if s_date != e_date else start_date.strftime("%m月%d日")
         else:
-            s_date = date.today().strftime("%Y-%m-%d")
+            yest = date.today() - timedelta(days=1)
+            s_date = yest.strftime("%Y-%m-%d")
             e_date = s_date
-            date_title = "今日"
+            date_title = yest.strftime("%m月%d日")
 
         for item in classes_data:
             class_id = str(item.get("id") or item.get("class_id"))
@@ -247,7 +253,7 @@ with login_tab2:
         st.session_state.token = token_input
         update_url_params()
 
-report_type = st.radio("选择统计周期：", ["今日汇报", "周汇报", "月汇报", "自定义时间"], horizontal=True)
+report_type = st.radio("选择统计周期：", ["昨日汇报", "周汇报", "月汇报", "自定义时间"], horizontal=True)
 
 start_date, end_date = date.today(), date.today()
 if report_type == "自定义时间":
@@ -273,7 +279,7 @@ with st.expander("✨ 点击展开/收起：自由编辑排版和文案样式", 
     st.markdown("""
     可用占位符说明：
     * `{class_name}`: 班级名称
-    * `{date_title}`: 统计时间段
+    * `{date_title}`: 确切日期或时间段（如 08月02日）
     * `{tops}`: 光荣榜名单
     * `{mids}`: 再努努力名单
     * `{zeros}`: 未打卡名单
