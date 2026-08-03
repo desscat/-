@@ -122,9 +122,9 @@ def run_automation_web(username, password, report_type, start_date, end_date, cl
         page = context.new_page()
 
         try:
-            status_placeholder.info("🔑 正在打开全阅读登录页面...")
-            page.goto(login_url, wait_until="networkidle", timeout=30000)
-            page.wait_for_selector("input", timeout=15000)
+        status_placeholder.info("🔑 正在打开全阅读登录页面...")
+            page.goto(login_url, wait_until="domcontentloaded", timeout=60000)
+            page.wait_for_selector("input", timeout=20000)
             
             inputs = page.query_selector_all("input[type='text'], input[type='password'], input:not([type='checkbox'])")
             if len(inputs) >= 2:
