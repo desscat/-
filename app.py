@@ -142,30 +142,44 @@ def run_automation_web(username, password, report_type, start_date, end_date, cl
         try:
             status_placeholder.info("🔑 正在打开全阅读登录页面...")
             page.goto(login_url, wait_until="domcontentloaded", timeout=60000)
-            page.wait_for_selector("input", timeout=20000)
             
-            inputs = page.query_selector_all("input[type='text'], input[type='password'], input:not([type='checkbox'])")
+            # 精准定位可见输入框并输入账号密码
+            page.wait_for_selector("input", timeout=20000)
+            page.wait_for_timeout(1000)
+            
+            inputs = page.locator("input:visible").all()
             if len(inputs) >= 2:
+                inputs[0].click()
                 inputs[0].fill(username)
+                page.wait_for_timeout(300)
+                
+                inputs[1].click()
                 inputs[1].fill(password)
-
-            checkbox = page.query_selector("input[type='checkbox']")
-            if checkbox and not checkbox.is_checked():
-                checkbox.click()
                 page.wait_for_timeout(300)
 
-            login_button = page.query_selector("button:has-text('登录'), .el-button--primary")
-            if login_button:
-                login_button.click()
-                page.wait_for_timeout(2000)
+            # 勾选协议
+            try:
+                checkbox = page.locator("input[type='checkbox']")
+                if checkbox.count() > 0 and not checkbox.is_checked():
+                    checkbox.click()
+                    page.wait_for_timeout(300)
+            except:
+                pass
+
+            # 点击登录
+            login_btn = page.locator("button, .el-button--primary").filter(has_text=re.compile("登录"))
+            if login_btn.count() > 0:
+                login_btn.first.click()
+            else:
+                page.keyboard.press("Enter")
+                
+            page.wait_for_timeout(2000)
 
             try:
                 modal_agree_btn = page.query_selector(".el-message-box .el-button--primary, .el-dialog .el-button--primary")
                 if modal_agree_btn:
                     modal_agree_btn.click()
                     page.wait_for_timeout(1000)
-                    if login_button:
-                        login_button.click()
             except Exception:
                 pass
 
@@ -455,7 +469,6 @@ if submit_button:
                     status.error("⚠️ 未能获取到任何有效数据，请确认输入的账号密码是否正确。")
         except Exception as e:
             status.error(f"❌ 运行遭遇异常：{str(e)}")
-            # 如果有报错截图，直接在页面上展示出来
             if st.session_state.last_error_screenshot:
-                st.warning("📸 以下是程序中断时，云端浏览器捕获的实时画面，您可以参考它来排查卡在哪一步：")
+                st.warning("📸 以下是程序中断时，云端浏览器捕获的实时画面：")
                 st.image(st.session_state.last_error_screenshot, caption="出错时的网页截图", use_column_width=True)
