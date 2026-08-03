@@ -266,7 +266,6 @@ st.subheader("1. 身份凭证与时间选择")
 if st.button("🧹 退出当前账号 / 清除缓存重置", type="secondary"):
     st.session_state.clear()
     st.query_params.clear()
-    # 注入一段 JavaScript，强行让浏览器跳转到无参数的干净主网址并整体刷新
     components.html("""
         <script>
             setTimeout(function() {
@@ -274,8 +273,6 @@ if st.button("🧹 退出当前账号 / 清除缓存重置", type="secondary"):
             }, 100);
         </script>
     """, height=0)
-    st.success("✨ 已重置，正在刷新网页...")
-    st.stop()
 
 login_tab1, login_tab2 = st.tabs(["🔐 账号密码登录", "🔑 Token 凭证"])
 with login_tab1:
