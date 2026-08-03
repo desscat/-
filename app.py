@@ -16,6 +16,7 @@ query_params = st.query_params
 stored_token = query_params.get("token", "")
 stored_rules = query_params.get("rules", "")
 stored_maps = query_params.get("maps", "")
+stored_template = query_params.get("template", "")
 
 # 解析 JSON 规则
 try:
@@ -28,6 +29,22 @@ try:
 except Exception:
     init_maps = {}
 
+# 默认的 DIY 模板样式
+default_template = """[以下为{date_title}的打卡情况]
+
+🏆 {class_name}
+
+🌟【今日光荣榜】
+{tops}
+
+💪【再努努力】
+{mids}
+
+⏰【该起床打卡啦】
+{zeros}"""
+
+init_template = urllib.parse.unquote(stored_template) if stored_template else default_template
+
 # Session 状态同步
 if "class_rules" not in st.session_state:
     st.session_state.class_rules = init_rules
@@ -38,13 +55,18 @@ if "name_maps" not in st.session_state:
 if "token" not in st.session_state:
     st.session_state.token = stored_token
 
+if "custom_template" not in st.session_state:
+    st.session_state.custom_template = init_template
+
 # 同步并更新当前的 URL 参数
 def update_url_params():
     rules_str = urllib.parse.quote(json.dumps(st.session_state.class_rules, ensure_ascii=False))
     maps_str = urllib.parse.quote(json.dumps(st.session_state.name_maps, ensure_ascii=False))
+    template_str = urllib.parse.quote(st.session_state.custom_template)
     st.query_params["token"] = st.session_state.token
     st.query_params["rules"] = rules_str
     st.query_params["maps"] = maps_str
+    st.query_params["template"] = template_str
 
 # ==================== 2. 工具函数 ====================
 def parse_name_map(map_str):
@@ -90,7 +112,7 @@ def process_student_data(class_name, name, listen, anim, books, req_listen, req_
     missing_str = ", ".join(missing)
     return "MID", f"{eng_name}：已达标 (距离全勤还缺：{missing_str})"
 
-def generate_markdown(class_name, date_title, student_list, req_listen, req_anim, req_books, name_map_str):
+def generate_custom_report(template_str, class_name, date_title, student_list, req_listen, req_anim, req_books, name_map_str):
     tops, mids, zeros = [], [], []
     for student in student_list:
         status, text = process_student_data(
@@ -108,19 +130,14 @@ def generate_markdown(class_name, date_title, student_list, req_listen, req_anim
     mids_formatted = "\n\n".join(mids) if mids else "（无）"
     zeros_formatted = "\n\n".join(zeros) if zeros else "（无）"
     
-    return f"""[以下为{date_title}的打卡情况]
-
-🏆 {class_name}
-
-🌟【今日光荣榜】
-{tops_formatted}
-
-💪【再努努力】
-{mids_formatted}
-
-⏰【该起床打卡啦】
-{zeros_formatted}
-"""
+    # 按照用户的 DIY 模板进行占位符替换
+    return template_str.format(
+        class_name=class_name,
+        date_title=date_title,
+        tops=tops_formatted,
+        mids=mids_formatted,
+        zeros=zeros_formatted
+    )
 
 # ==================== 3. API 请求逻辑 ====================
 def auto_login(username, password):
@@ -142,7 +159,7 @@ def auto_login(username, password):
     except Exception as e:
         return None, f"网络错误：{str(e)}"
 
-def fetch_data_via_api(auth_token, report_type, start_date, end_date, class_rules_config, name_maps_config, default_rule):
+def fetch_data_via_api(auth_token, report_type, start_date, end_date, class_rules_config, name_maps_config, default_rule, template_str):
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
         "Token": auth_token,
@@ -206,8 +223,8 @@ def fetch_data_via_api(auth_token, report_type, start_date, end_date, class_rule
                 matched_rule = next((class_rules_config[k] for k in class_rules_config if k in class_name or class_name in k), default_rule)
                 matched_name_map = next((name_maps_config[k] for k in name_maps_config if k in class_name or class_name in k), "")
 
-                md_res = generate_markdown(
-                    class_name, date_title, students_data,
+                md_res = generate_custom_report(
+                    template_str, class_name, date_title, students_data,
                     matched_rule["listen"], matched_rule["anim"], matched_rule["books"],
                     matched_name_map
                 )
@@ -217,7 +234,7 @@ def fetch_data_via_api(auth_token, report_type, start_date, end_date, class_rule
     except Exception as e:
         return None, str(e)
 
-# ==================== 4. 界面展示（单栏流式布局，手机端完美适配） ====================
+# ==================== 4. 界面展示 ====================
 st.subheader("1. 身份凭证与时间选择")
 
 login_tab1, login_tab2 = st.tabs(["🔐 账号密码登录", "🔑 Token 凭证"])
@@ -251,7 +268,26 @@ with col_g3:
     def_books = st.number_input("默认绘本(本)", value=2, step=1)
 default_rule = {"listen": def_listen, "anim": def_anim, "books": def_books}
 
-st.subheader("3. ⚙️ 班级规则与英文映射")
+st.subheader("3. 🎨 DIY 自定义报告模板样式")
+with st.expander("✨ 点击展开/收起：自由编辑排版和文案样式", expanded=False):
+    st.markdown("""
+    可用占位符说明：
+    * `{class_name}`: 班级名称
+    * `{date_title}`: 统计时间段
+    * `{tops}`: 光荣榜名单
+    * `{mids}`: 再努努力名单
+    * `{zeros}`: 未打卡名单
+    """)
+    custom_template_input = st.text_area(
+        "修改下方的模板内容（支持自定义文字和排版）：",
+        value=st.session_state.custom_template,
+        height=220
+    )
+    if custom_template_input != st.session_state.custom_template:
+        st.session_state.custom_template = custom_template_input
+        update_url_params()
+
+st.subheader("4. ⚙️ 班级规则与英文映射")
 new_class_input = st.text_input("➕ 添加班级全称：", placeholder="例如：康乐E4")
 if st.button("添加班级"):
     if new_class_input and new_class_input not in st.session_state.class_rules:
@@ -308,11 +344,15 @@ if submit_button:
         st.warning("⚠️ 请输入账号密码或 Token！")
     else:
         with st.spinner("⚡ 正在获取全阅读打卡数据..."):
-            reports, err = fetch_data_via_api(current_token, report_type, start_date, end_date, class_rules_config, name_maps_config, default_rule)
+            reports, err = fetch_data_via_api(
+                current_token, report_type, start_date, end_date, 
+                class_rules_config, name_maps_config, default_rule, 
+                st.session_state.custom_template
+            )
             if err:
                 st.error(f"❌ 错误：{err}")
             elif reports:
-                st.success("🎉 生成成功！手机端直接点击下方代码块右上角的复制按钮即可：")
+                st.success("🎉 生成成功！你可以直接复制下方排好的报告：")
                 for c_name, c_content in reports.items():
                     st.markdown(f"### 📍 {c_name} 打卡报告")
                     st.code(c_content, language=None)
