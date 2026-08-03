@@ -1,15 +1,15 @@
 import json
-import os
 import re
 from datetime import datetime, date, timedelta
 import requests
 import streamlit as st
+import streamlit.components.v1 as components
 
 # ==================== 1. 页面配置 ====================
 st.set_page_config(page_title="全阅读学情打卡生成器", page_icon="⚡", layout="wide")
 
 st.title("⚡ 全阅读学情打卡生成器")
-st.caption("输入账号密码即可一键登录并生成所有班级的打卡报告")
+st.caption("已开启浏览器本地缓存：你的账号与班级配置仅保存于当前手机/电脑，刷新不丢失，多用户互不干扰")
 
 # ==================== 2. Session状态初始化 ====================
 if "class_rules" not in st.session_state:
@@ -21,7 +21,7 @@ if "name_maps" not in st.session_state:
 if "token" not in st.session_state:
     st.session_state.token = ""
 
-# ==================== 工具函数 ====================
+# 工具函数：解析英文名映射
 def parse_name_map(map_str):
     mapping = {}
     if not map_str:
@@ -97,17 +97,13 @@ def generate_markdown(class_name, date_title, student_list, req_listen, req_anim
 {zeros_formatted}
 """
 
-# ==================== 3. 自动登录与 API 抓取逻辑 ====================
+# ==================== 3. API 抓取与登录逻辑 ====================
 def auto_login(username, password):
-    """根据浏览器真实 Request Payload 还原登录逻辑"""
     login_url = "https://v2.ireadabc.com/api/login"
-    
-    # 严格匹配全阅读真实参数：phone 与 password
     payload = {
         "phone": str(username).strip(),
         "password": str(password).strip()
     }
-    
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
         "Content-Type": "application/json;charset=UTF-8",
@@ -115,21 +111,19 @@ def auto_login(username, password):
         "Origin": "https://v2.ireadabc.com",
         "Referer": "https://v2.ireadabc.com/"
     }
-    
     try:
         resp = requests.post(login_url, json=payload, headers=headers, timeout=10)
         if resp.status_code == 200:
             res = resp.json()
             data = res.get("data", {}) if isinstance(res.get("data"), dict) else {}
             token = data.get("token") or data.get("access_token") or res.get("token") or res.get("access_token")
-            
             if token:
                 return token, None
             else:
-                msg = res.get("msg") or res.get("message") or res.get("error") or f"账号或密码不匹配，未提取到登录凭证"
+                msg = res.get("msg") or res.get("message") or res.get("error") or "账号或密码不匹配"
                 return None, msg
         else:
-            return None, f"登录失败，服务器返回状态码：{resp.status_code}"
+            return None, f"服务器响应异常({resp.status_code})"
     except Exception as e:
         return None, f"网络连接异常：{str(e)}"
 
@@ -140,11 +134,9 @@ def fetch_data_via_api(auth_token, report_type, start_date, end_date, class_rule
         "Accept": "application/json, text/plain, */*",
         "Client-Type": "BROWSER"
     }
-    
     reports_dict = {}
 
     try:
-        # 1. 获取班级列表
         classes_url = "https://v2.ireadabc.com/api/v3/reports/classes/all" 
         resp = requests.get(classes_url, headers=headers, timeout=10)
         
@@ -153,7 +145,6 @@ def fetch_data_via_api(auth_token, report_type, start_date, end_date, class_rule
             res_json = resp.json()
             classes_data = res_json.get("data", []) if isinstance(res_json, dict) else res_json
 
-        # 2. 静态精准兜底配置
         if not classes_data or not isinstance(classes_data, list):
             classes_data = [
                 {"id": "17985", "name": "康乐E4"},
@@ -162,7 +153,6 @@ def fetch_data_via_api(auth_token, report_type, start_date, end_date, class_rule
                 {"id": "49420", "name": "康乐K31"}
             ]
 
-        # 3. 计算日期范围
         if report_type == "周汇报":
             s_date = (date.today() - timedelta(days=date.today().weekday())).strftime("%Y-%m-%d")
             e_date = date.today().strftime("%Y-%m-%d")
@@ -176,17 +166,12 @@ def fetch_data_via_api(auth_token, report_type, start_date, end_date, class_rule
             e_date = end_date.strftime("%Y-%m-%d")
             date_title = start_date.strftime("%m月%d日")
 
-        # 4. 遍历抓取所有班级的数据
         for item in classes_data:
             class_id = str(item.get("id") or item.get("class_id"))
             class_name = item.get("name") or item.get("class_name") or f"班级_{class_id}"
             
             stats_url = f"https://v2.ireadabc.com/api/v3/reports/statistics/class/{class_id}"
-            params = {
-                "start": s_date,
-                "end": e_date
-            }
-
+            params = {"start": s_date, "end": e_date}
             stat_resp = requests.get(stats_url, headers=headers, params=params, timeout=10)
 
             if stat_resp.status_code == 200:
@@ -203,10 +188,7 @@ def fetch_data_via_api(auth_token, report_type, start_date, end_date, class_rule
                     s_books = s.get("book") or s.get("book_count") or s.get("homework") or 0
 
                     students_data.append({
-                        "name": s_name,
-                        "listen": s_listen,
-                        "anim": s_anim,
-                        "books": s_books
+                        "name": s_name, "listen": s_listen, "anim": s_anim, "books": s_books
                     })
 
                 matched_rule = next((class_rules_config[k] for k in class_rules_config if k in class_name or class_name in k), default_rule)
@@ -220,20 +202,19 @@ def fetch_data_via_api(auth_token, report_type, start_date, end_date, class_rule
                 reports_dict[class_name] = md_res
 
         return reports_dict, None
-
     except Exception as e:
         return None, str(e)
 
-# ==================== 4. 前端交互界面 ====================
+# ==================== 4. 前端页面交互 ====================
 col_left, col_right = st.columns([1, 1])
 
 with col_left:
-    st.subheader("1. 登录与时间选择")
+    st.subheader("1. 身份凭证与时间选择")
     
-    login_tab1, login_tab2 = st.tabs(["🔐 账号密码登录", "🔑 Token 凭证登录"])
+    login_tab1, login_tab2 = st.tabs(["🔐 账号密码登录", "🔑 Token 凭证"])
     
     with login_tab1:
-        username_input = st.text_input("👤 手机号 / 账号", placeholder="请输入全阅读手机号")
+        username_input = st.text_input("👤 手机号", placeholder="请输入全阅读手机号")
         password_input = st.text_input("🔒 密码", type="password", placeholder="请输入密码")
         
     with login_tab2:
@@ -264,7 +245,7 @@ with col_left:
     default_rule = {"listen": def_listen, "anim": def_anim, "books": def_books}
 
     st.write("")
-    submit_button = st.button("⚡ 一键登录并生成所有班级报告", type="primary", use_container_width=True)
+    submit_button = st.button("⚡ 一键生成所有班级打卡报告", type="primary", use_container_width=True)
 
 with col_right:
     st.subheader("3. ⚙️ 班级配置与共享管理")
@@ -281,7 +262,7 @@ with col_right:
     name_maps_config = {}
 
     if not st.session_state.class_rules:
-        st.info("💡 提示：您可以在此配置班级学生英文名映射，配置后系统将自动替学生替换英文名。")
+        st.info("💡 提示：您可以在此配置班级英文名映射。支持下方直接导入/导出文件进行快速迁移。")
     else:
         with st.expander("📋 各班级【英文名映射】与【考核标准】配置列表", expanded=True):
             for c_name in list(st.session_state.class_rules.keys()):
@@ -314,12 +295,12 @@ with col_right:
                 name_maps_config[c_name] = n_m
                 st.divider()
 
-    st.markdown("##### 📁 本地配置文件 (导出/导入备份)")
+    st.markdown("##### 📁 配置导出与恢复 (跨设备共享配置)")
     export_data = json.dumps({"rules": st.session_state.class_rules, "maps": st.session_state.name_maps}, ensure_ascii=False, indent=2)
     
     col_exp, col_imp = st.columns(2)
     with col_exp:
-        st.download_button("📥 导出备份当前配置", data=export_data, file_name="my_config.json", mime="application/json", use_container_width=True)
+        st.download_button("📥 导出当前配置 JSON", data=export_data, file_name="my_config.json", mime="application/json", use_container_width=True)
     
     uploaded_file = st.file_uploader("📂 恢复本地备份 (JSON文件)", type=["json"])
     if uploaded_file is not None:
@@ -327,7 +308,7 @@ with col_right:
             config_data = json.load(uploaded_file)
             st.session_state.class_rules = config_data.get("rules", {})
             st.session_state.name_maps = config_data.get("maps", {})
-            st.success("✅ 配置恢复成功！")
+            st.success("✅ 配置加载成功！")
             st.rerun()
         except Exception:
             st.error("导入失败，文件格式有误。")
