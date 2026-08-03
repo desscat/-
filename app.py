@@ -235,7 +235,7 @@ def fetch_data_via_api(auth_token, report_type, start_date, end_date, class_rule
                         "name": s.get("name") or s.get("student_name") or "",
                         "listen": s.get("listen") or s.get("audio_time") or 0,
                         "anim": s.get("animation") or s.get("anim") or s.get("video_time") or 0,
-                        "books": s.get("read") or s.get("book") or s.get("book_count") or 0
+                        "books": s.get("grading") or s.get("read") or s.get("book") or s.get("book_count") or 0
                     })
 
                 base_rule = next((class_rules_config[k] for k in class_rules_config if k in class_name or class_name in k), default_rule)
