@@ -14,10 +14,20 @@ st.caption("已启用浏览器 LocalStorage：各自手机独立记忆账号与�
 # 初始化本地存储对象
 local_storage = LocalStorage()
 
+# 安全读取函数
+def safe_get_item(key_name):
+    try:
+        val = local_storage.getItem(key_name)
+        if isinstance(val, dict):
+            return val.get("value")
+        return val
+    except Exception:
+        return None
+
 # 从浏览器本地存储获取持久化数据
-stored_token = local_storage.getItem("read_app_token", key="get_token") or ""
-stored_rules = local_storage.getItem("read_app_rules", key="get_rules")
-stored_maps = local_storage.getItem("read_app_maps", key="get_maps")
+stored_token = safe_get_item("read_app_token") or ""
+stored_rules = safe_get_item("read_app_rules")
+stored_maps = safe_get_item("read_app_maps")
 
 # 解析 JSON 规则
 try:
@@ -240,7 +250,10 @@ with col_left:
         token_input = st.text_input("🔑 Token 凭证", value=st.session_state.token, type="password", placeholder="粘贴 Token 凭证")
         if token_input != st.session_state.token:
             st.session_state.token = token_input
-            local_storage.setItem("read_app_token", token_input, key="set_token_input")
+            try:
+                local_storage.setItem("read_app_token", token_input)
+            except Exception:
+                pass
 
     st.write("")
     report_type = st.radio("选择统计周期：", ["今日汇报", "周汇报", "月汇报", "自定义"], horizontal=True)
@@ -276,9 +289,11 @@ with col_right:
             st.session_state.class_rules[new_class_input] = {"listen": 60, "anim": 15, "books": 2}
             st.session_state.name_maps[new_class_input] = ""
             
-            # 写入手机本地缓存
-            local_storage.setItem("read_app_rules", json.dumps(st.session_state.class_rules), key="set_rules_add")
-            local_storage.setItem("read_app_maps", json.dumps(st.session_state.name_maps), key="set_maps_add")
+            try:
+                local_storage.setItem("read_app_rules", json.dumps(st.session_state.class_rules))
+                local_storage.setItem("read_app_maps", json.dumps(st.session_state.name_maps))
+            except Exception:
+                pass
             
             st.success(f"已成功添加班级：{new_class_input}")
             st.rerun()
@@ -300,9 +315,11 @@ with col_right:
                         if c_name in st.session_state.name_maps:
                             del st.session_state.name_maps[c_name]
                         
-                        # 更新本地缓存
-                        local_storage.setItem("read_app_rules", json.dumps(st.session_state.class_rules), key=f"set_rules_del_{c_name}")
-                        local_storage.setItem("read_app_maps", json.dumps(st.session_state.name_maps), key=f"set_maps_del_{c_name}")
+                        try:
+                            local_storage.setItem("read_app_rules", json.dumps(st.session_state.class_rules))
+                            local_storage.setItem("read_app_maps", json.dumps(st.session_state.name_maps))
+                        except Exception:
+                            pass
                         st.rerun()
 
                 c1, c2, c3 = st.columns(3)
@@ -338,8 +355,11 @@ with col_right:
             st.session_state.class_rules = config_data.get("rules", {})
             st.session_state.name_maps = config_data.get("maps", {})
             
-            local_storage.setItem("read_app_rules", json.dumps(st.session_state.class_rules), key="set_rules_import")
-            local_storage.setItem("read_app_maps", json.dumps(st.session_state.name_maps), key="set_maps_import")
+            try:
+                local_storage.setItem("read_app_rules", json.dumps(st.session_state.class_rules))
+                local_storage.setItem("read_app_maps", json.dumps(st.session_state.name_maps))
+            except Exception:
+                pass
             
             st.success("✅ 配置加载成功！")
             st.rerun()
@@ -358,7 +378,10 @@ if submit_button:
             else:
                 current_token = login_token
                 st.session_state.token = login_token
-                local_storage.setItem("read_app_token", login_token, key="set_token_login")
+                try:
+                    local_storage.setItem("read_app_token", login_token)
+                except Exception:
+                    pass
                 st.success("✅ 登录成功，Token 已记住在本地！")
 
     if not current_token:
