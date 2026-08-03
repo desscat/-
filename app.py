@@ -103,7 +103,7 @@ def generate_markdown(class_name, date_title, student_list, req_listen, req_anim
 # ==================== 3. 核心抓取逻辑（返回班级报告列表） ====================
 def run_automation_web(username, password, report_type, start_date, end_date, class_rules_config, name_maps_config, default_rule, status_placeholder):
     login_url = "https://v2.ireadabc.com/#/admin/classes/index"
-    reports_dict = {}  # 改为字典：{"班级名": "报告内容"}
+    reports_dict = {}
 
     with sync_playwright() as p:
         status_placeholder.info("🚀 正在启动云端后台浏览器...")
@@ -122,7 +122,7 @@ def run_automation_web(username, password, report_type, start_date, end_date, cl
         page = context.new_page()
 
         try:
-        status_placeholder.info("🔑 正在打开全阅读登录页面...")
+            status_placeholder.info("🔑 正在打开全阅读登录页面...")
             page.goto(login_url, wait_until="domcontentloaded", timeout=60000)
             page.wait_for_selector("input", timeout=20000)
             
@@ -395,7 +395,6 @@ if submit_button:
                     st.divider()
                     st.subheader("📋 各班级独立打卡报告（可单独查看与复制）")
                     
-                    # 循环为每个班级生成独立的输入框和下载按钮
                     for c_name, c_content in reports_dict.items():
                         with st.container():
                             st.markdown(f"### 📍 班级：`{c_name}`")
@@ -411,7 +410,6 @@ if submit_button:
                             )
                             st.markdown("---")
                     
-                    # 同时提供一个打包下载所有班级的完整文件按钮
                     all_text = "\n\n" + ("=" * 40) + "\n\n".join(reports_dict.values())
                     st.download_button(
                         label="📦 一键打包下载所有班级报告 (Markdown)",
