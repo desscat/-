@@ -22,19 +22,43 @@ default_template = """[以下为{date_title}的打卡情况]
 ⏰【该起床打卡啦】
 {zeros}"""
 
-if "class_rules" not in st.session_state:
-    st.session_state.class_rules = {}
+# ==================== 2. 从 URL 恢复配置（链接持久化） ====================
+params = st.query_params
 
-if "name_maps" not in st.session_state:
-    st.session_state.name_maps = {}
+# Token
+url_token = params.get("token", "")
 
+# 班级规则与映射
+try:
+    url_rules = json.loads(params.get("rules", "{}"))
+except:
+    url_rules = {}
+
+try:
+    url_maps = json.loads(params.get("maps", "{}"))
+except:
+    url_maps = {}
+
+url_template = params.get("template", default_template)
+
+# 初始化 Session State
 if "token" not in st.session_state:
-    st.session_state.token = ""
-
+    st.session_state.token = url_token
+if "class_rules" not in st.session_state:
+    st.session_state.class_rules = url_rules
+if "name_maps" not in st.session_state:
+    st.session_state.name_maps = url_maps
 if "custom_template" not in st.session_state:
-    st.session_state.custom_template = default_template
+    st.session_state.custom_template = url_template
 
-# ==================== 2. 工具函数 ====================
+def save_to_url():
+    """将当前状态同步保存到浏览器的 URL 链接参数中"""
+    st.query_params["token"] = st.session_state.token
+    st.query_params["rules"] = json.dumps(st.session_state.class_rules, ensure_ascii=False)
+    st.query_params["maps"] = json.dumps(st.session_state.name_maps, ensure_ascii=False)
+    st.query_params["template"] = st.session_state.custom_template
+
+# ==================== 3. 工具函数 ====================
 def parse_name_map(map_str):
     mapping = {}
     if not map_str:
@@ -104,7 +128,7 @@ def generate_custom_report(template_str, class_name, date_title, student_list, r
         zeros=zeros_formatted
     )
 
-# ==================== 3. API 请求逻辑 ====================
+# ==================== 4. API 请求逻辑 ====================
 def auto_login(username, password):
     login_url = "https://v2.ireadabc.com/api/login"
     payload = {"phone": str(username).strip(), "password": str(password).strip()}
@@ -145,7 +169,6 @@ def fetch_data_via_api(auth_token, report_type, start_date, end_date, class_rule
         res_json = resp.json()
         raw_data = res_json.get("data", [])
         
-        # 精准命中 rows、list、records 等各种格式
         classes_data = []
         if isinstance(raw_data, list):
             classes_data = raw_data
@@ -191,13 +214,12 @@ def fetch_data_via_api(auth_token, report_type, start_date, end_date, class_rule
             days_count = 1
 
         for item in classes_data:
-            # 兼容 class_id 和 id 字段
             class_id = str(item.get("class_id") or item.get("id"))
             class_name = item.get("class_name") or item.get("name") or f"班级_{class_id}"
             
             stats_url = f"https://v2.ireadabc.com/api/v3/reports/statistics/class/{class_id}"
-            params = {"start": s_date, "end": e_date}
-            stat_resp = requests.get(stats_url, headers=headers, params=params, timeout=20)
+            params_req = {"start": s_date, "end": e_date}
+            stat_resp = requests.get(stats_url, headers=headers, params=params_req, timeout=20)
 
             if stat_resp.status_code == 200:
                 s_json = stat_resp.json()
@@ -234,10 +256,12 @@ def fetch_data_via_api(auth_token, report_type, start_date, end_date, class_rule
     except Exception as e:
         return None, str(e)
 
-# ==================== 4. 界面展示 ====================
+# ==================== 5. 界面展示 ====================
 st.subheader("1. 身份凭证与时间选择")
 
-if st.button("🧹 清空当前凭证缓存", type="secondary"):
+# 只有点击重置键，才会清空 URL 参数和缓存
+if st.button("🧹 重置并清空所有缓存与链接", type="secondary"):
+    st.query_params.clear()
     st.session_state.token = ""
     st.session_state.class_rules = {}
     st.session_state.name_maps = {}
@@ -252,6 +276,7 @@ with login_tab2:
     token_input = st.text_input("🔑 Token 凭证", value=st.session_state.token, type="password")
     if token_input != st.session_state.token:
         st.session_state.token = token_input
+        save_to_url()
 
 report_type = st.radio("选择统计周期：", ["昨日汇报", "周汇报", "月汇报", "自定义时间"], horizontal=True)
 
@@ -283,6 +308,7 @@ with st.expander("✨ 点击展开/收起：自由编辑排版和文案样式", 
     )
     if custom_template_input != st.session_state.custom_template:
         st.session_state.custom_template = custom_template_input
+        save_to_url()
 
 st.subheader("4. ⚙️ 班级规则与英文映射")
 new_class_input = st.text_input("➕ 添加班级全称：", placeholder="例如：万达K12班")
@@ -290,6 +316,7 @@ if st.button("添加班级"):
     if new_class_input and new_class_input not in st.session_state.class_rules:
         st.session_state.class_rules[new_class_input] = {"listen": 60, "anim": 15, "books": 2}
         st.session_state.name_maps[new_class_input] = ""
+        save_to_url()
         st.rerun()
 
 class_rules_config = {}
@@ -304,19 +331,29 @@ for c_name in list(st.session_state.class_rules.keys()):
             del st.session_state.class_rules[c_name]
             if c_name in st.session_state.name_maps:
                 del st.session_state.name_maps[c_name]
+            save_to_url()
             st.rerun()
 
     c1, c2, c3 = st.columns(3)
-    l_v = c1.number_input(f"每日听音", value=st.session_state.class_rules[c_name]["listen"], step=5, key=f"l_{c_name}")
-    a_v = c2.number_input(f"每日动画", value=st.session_state.class_rules[c_name]["anim"], step=5, key=f"a_{c_name}")
-    b_v = c3.number_input(f"每日绘本", value=st.session_state.class_rules[c_name]["books"], step=1, key=f"b_{c_name}")
     
-    n_m = st.text_area(f"映射 (中文:英文)", value=st.session_state.name_maps.get(c_name, ""), key=f"m_{c_name}", height=65)
+    def update_rule(c=c_name):
+        st.session_state.class_rules[c]["listen"] = st.session_state[f"l_{c}"]
+        st.session_state.class_rules[c]["anim"] = st.session_state[f"a_{c}"]
+        st.session_state.class_rules[c]["books"] = st.session_state[f"b_{c}"]
+        save_to_url()
+
+    def update_map(c=c_name):
+        st.session_state.name_maps[c] = st.session_state[f"m_{c}"]
+        save_to_url()
+
+    l_v = c1.number_input(f"每日听音", value=st.session_state.class_rules[c_name]["listen"], step=5, key=f"l_{c_name}", on_change=update_rule)
+    a_v = c2.number_input(f"每日动画", value=st.session_state.class_rules[c_name]["anim"], step=5, key=f"a_{c_name}", on_change=update_rule)
+    b_v = c3.number_input(f"每日绘本", value=st.session_state.class_rules[c_name]["books"], step=1, key=f"b_{c_name}", on_change=update_rule)
     
-    st.session_state.class_rules[c_name] = {"listen": l_v, "anim": a_v, "books": b_v}
-    st.session_state.name_maps[c_name] = n_m
-    class_rules_config[c_name] = {"listen": l_v, "anim": a_v, "books": b_v}
-    name_maps_config[c_name] = n_m
+    n_m = st.text_area(f"映射 (中文:英文)", value=st.session_state.name_maps.get(c_name, ""), key=f"m_{c_name}", height=65, on_change=update_map)
+    
+    class_rules_config[c_name] = st.session_state.class_rules[c_name]
+    name_maps_config[c_name] = st.session_state.name_maps.get(c_name, "")
 
 st.divider()
 submit_button = st.button("⚡ 一键生成所有班级打卡报告", type="primary", use_container_width=True)
@@ -332,6 +369,8 @@ if submit_button:
                 st.stop()
             else:
                 final_token = login_token
+                st.session_state.token = login_token
+                save_to_url()
     else:
         final_token = st.session_state.token
 
