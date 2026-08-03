@@ -8,7 +8,7 @@ from app import run_automation_web, generate_markdown
 
 # ==================== 1. 配置参数 ====================
 # 将这里的配置替换为你自己的真实信息
-PUSHPLUS_TOKEN = "你的PushPlus_Token"  # 填入第一步获取的 Token
+PUSHPLUS_TOKEN = "8e6def430cef47be99f2a6fe4b5aa2f7"  # 填入第一步获取的 Token
 IREAD_USER = "你的全阅读账号"
 IREAD_PWD = "你的全阅读密码"
 
