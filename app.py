@@ -46,7 +46,7 @@ default_template = """[以下为{date_title}的打卡情况]
 
 init_template = urllib.parse.unquote(stored_template) if stored_template else default_template
 
-# Session 状态初始化
+# Session 状态安全初始化
 if "class_rules" not in st.session_state:
     st.session_state.class_rules = init_rules
 
@@ -180,7 +180,6 @@ def fetch_data_via_api(auth_token, report_type, start_date, end_date, class_rule
                 {"id": "49420", "name": "康乐K31"}
             ]
 
-        # 日期范围与天数计算
         days_count = 1
         if report_type == "昨日汇报":
             yest = date.today() - timedelta(days=1)
@@ -262,10 +261,14 @@ def fetch_data_via_api(auth_token, report_type, start_date, end_date, class_rule
 # ==================== 4. 界面展示 ====================
 st.subheader("1. 身份凭证与时间选择")
 
-# 终极重置按钮：清空状态、清空 URL 参数并通过 JS 强制刷新回干净的原始链接
+# 重置按钮：安全清空参数并通过 JS 刷新回初始干净网页
 if st.button("🧹 退出当前账号 / 清除缓存重置", type="secondary"):
-    st.session_state.clear()
-    st.query_params.clear()
+    st.session_state.token = ""
+    st.session_state.class_rules = {}
+    st.session_state.name_maps = {}
+    st.session_state.custom_template = default_template
+    for key in list(st.query_params.keys()):
+        del st.query_params[key]
     components.html("""
         <script>
             setTimeout(function() {
@@ -279,6 +282,9 @@ with login_tab1:
     username_input = st.text_input("👤 手机号", placeholder="请输入全阅读手机号")
     password_input = st.text_input("🔒 密码", type="password", placeholder="请输入密码")
 with login_tab2:
+    # 确保 session_state 中有 token 键，防止报错
+    if "token" not in st.session_state:
+        st.session_state.token = ""
     token_input = st.text_input("🔑 Token 凭证", value=st.session_state.token, type="password")
     if token_input != st.session_state.token:
         st.session_state.token = token_input
