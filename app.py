@@ -315,7 +315,7 @@ if submit_button:
             if err:
                 st.error(f"❌ 错误：{err}")
             elif reports:
-                st.success("🎉 生成成功！")
+                st.success("🎉 生成成功！每个班级下方均自带一键复制按钮：")
                 for c_name, c_content in reports.items():
-                    st.markdown(f"#### 📍 {c_name}")
+                    st.markdown(f"#### 📍 {c_name} 打卡报告")
                     st.code(c_content, language=None)
