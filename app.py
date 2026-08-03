@@ -165,7 +165,7 @@ def fetch_data_via_api(auth_token, report_type, start_date, end_date, class_rule
             d_start = date.today().replace(day=1)
             d_end = date.today()
             s_date = d_start.strftime("%Y-%m-%d")
-            e_date = d_end.strftime("%Y-%m-%d")
+            e_date = s_date
             date_title = f"{s_date}至{e_date}"
             days_count = (d_end - d_start).days + 1
         elif report_type == "自定义时间":
@@ -234,13 +234,12 @@ if st.button("🧹 退出当前账号 / 清除缓存重置", type="secondary"):
     st.session_state.class_rules = {}
     st.session_state.name_maps = {}
     st.session_state.custom_template = default_template
-    st.query_params.clear()
     st.rerun()
 
 login_tab1, login_tab2 = st.tabs(["🔐 账号密码登录", "🔑 Token 凭证"])
 with login_tab1:
-    username_input = st.text_input("👤 手机号", placeholder="请输入全阅读手机号")
-    password_input = st.text_input("🔒 密码", type="password", placeholder="请输入密码")
+    username_input = st.text_input("👤 手机号", placeholder="请输入要登录的手机号")
+    password_input = st.text_input("🔒 密码", type="password", placeholder="请输入对应的密码")
 with login_tab2:
     token_input = st.text_input("🔑 Token 凭证", value=st.session_state.token, type="password")
     if token_input != st.session_state.token:
@@ -250,7 +249,7 @@ report_type = st.radio("选择统计周期：", ["昨日汇报", "周汇报", "�
 
 start_date, end_date = date.today(), date.today()
 if report_type == "自定义时间":
-    st.info("📅 请选择开始和结束日期（跨多天时，要求标准会自动按天数乘以倍数）：")
+    st.info("📅 请选择开始和结束日期：")
     col_d1, col_d2 = st.columns(2)
     with col_d1:
         start_date = st.date_input("开始日期", value=date.today() - timedelta(days=1))
@@ -269,16 +268,8 @@ default_rule = {"listen": def_listen, "anim": def_anim, "books": def_books}
 
 st.subheader("3. 🎨 DIY 自定义报告模板样式")
 with st.expander("✨ 点击展开/收起：自由编辑排版和文案样式", expanded=False):
-    st.markdown("""
-    可用占位符说明：
-    * `{class_name}`: 班级名称
-    * `{date_title}`: 确切日期或时间段（如 08月02日）
-    * `{tops}`: 光荣榜名单
-    * `{mids}`: 再努努力名单
-    * `{zeros}`: 未打卡名单
-    """)
     custom_template_input = st.text_area(
-        "修改下方的模板内容（支持自定义文字和排版）：",
+        "修改下方的模板内容：",
         value=st.session_state.custom_template,
         height=220
     )
@@ -323,32 +314,35 @@ st.divider()
 submit_button = st.button("⚡ 一键生成所有班级打卡报告", type="primary", use_container_width=True)
 
 if submit_button:
-    current_token = st.session_state.token
+    final_token = ""
     
-    # 如果用户在第一个 Tab 输入了账号密码，优先用账号密码去请求登录换取 Token
+    # 【核心修改逻辑】：如果用户在 Tab 1 填写了手机号和密码，绝对优先走网络登录换取新 Token
     if username_input and password_input:
-        with st.spinner("🔑 正在通过账号密码登录获取 Token..."):
+        with st.spinner("🔑 正在通过朋友的账号密码登录获取新凭证..."):
             login_token, login_err = auto_login(username_input, password_input)
             if login_err:
                 st.error(f"❌ 登录失败：{login_err}")
                 st.stop()
             else:
-                current_token = login_token
-                st.session_state.token = login_token  # 关键修复：强制更新到全局会话状态中
-
-    if not current_token:
-        st.warning("⚠️ 请输入账号密码，或者在第二个标签页输入 Token 凭证！")
+                final_token = login_token
+                st.session_state.token = login_token  # 彻底覆盖全局
     else:
-        with st.spinner("⚡ 正在获取全阅读打卡数据..."):
+        # 否则才使用 Tab 2 中填写的 Token
+        final_token = st.session_state.token
+
+    if not final_token:
+        st.warning("⚠️ 请在上方输入“账号密码”或者切换到“Token 凭证”标签页输入 Token！")
+    else:
+        with st.spinner("⚡ 正在获取对应账号的全阅读打卡数据..."):
             reports, err = fetch_data_via_api(
-                current_token, report_type, start_date, end_date, 
+                final_token, report_type, start_date, end_date, 
                 class_rules_config, name_maps_config, default_rule, 
                 st.session_state.custom_template
             )
             if err:
                 st.error(f"❌ 错误：{err}")
             elif reports:
-                st.success("🎉 生成成功！你可以直接复制下方排好的报告：")
+                st.success("🎉 切换账号生成成功！")
                 for c_name, c_content in reports.items():
                     st.markdown(f"### 📍 {c_name} 打卡报告")
                     st.code(c_content, language=None)
