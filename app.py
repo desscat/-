@@ -1,18 +1,9 @@
 import os
 import re
 import json
-import time
-import subprocess
 from datetime import datetime, date, timedelta
 import streamlit as st
-
-# 自动补全驱动
-try:
-    from playwright.sync_api import sync_playwright
-except ImportError:
-    subprocess.run(["pip", "install", "playwright"])
-    subprocess.run(["playwright", "install", "chromium"])
-    from playwright.sync_api import sync_playwright
+from playwright.sync_api import sync_playwright
 
 # ==================== 1. 页面配置 ====================
 st.set_page_config(page_title="全阅读学情打卡生成器", page_icon="📚", layout="wide")
@@ -115,16 +106,21 @@ def run_automation_web(username, password, report_type, start_date, end_date, cl
     with sync_playwright() as p:
         status_placeholder.info("🚀 正在启动云端后台浏览器...")
         
-        browser = p.chromium.launch(
-            headless=True,
-            args=[
+        # 优先使用系统自带的 chromium 路径，保证云端稳定运行
+        browser_args = {
+            "headless": True,
+            "args": [
                 "--no-sandbox",
                 "--disable-setuid-sandbox",
                 "--disable-dev-shm-usage",
                 "--disable-accelerated-2d-canvas",
                 "--disable-gpu"
             ]
-        )
+        }
+        if os.path.exists("/usr/bin/chromium"):
+            browser_args["executable_path"] = "/usr/bin/chromium"
+
+        browser = p.chromium.launch(**browser_args)
         context = browser.new_context(viewport={"width": 1920, "height": 1080})
         page = context.new_page()
 
