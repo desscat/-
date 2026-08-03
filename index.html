@@ -1,0 +1,381 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>⚡ 全阅读学情打卡生成器</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+  </style>
+</head>
+<body class="bg-slate-50 min-h-screen p-4 md:p-8">
+
+  <div class="max-w-6xl mx-auto space-y-6">
+    <!-- 头部标题 -->
+    <div class="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
+      <h1 class="text-2xl font-bold text-slate-800 flex items-center gap-2">
+        <span>⚡</span> 全阅读学情打卡生成器
+      </h1>
+      <p class="text-sm text-slate-500 mt-1">本地储存已启用：各自手机独立记忆配置，刷新不丢失，可直接分享给同事使用。</p>
+    </div>
+
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+      
+      <!-- 左侧：凭证与参数 -->
+      <div class="space-y-6">
+        <!-- 账号 / Token -->
+        <div class="bg-white p-6 rounded-xl shadow-sm border border-slate-200 space-y-4">
+          <h2 class="font-semibold text-slate-800 border-b pb-2">1. 身份凭证</h2>
+          <div>
+            <label class="block text-sm font-medium text-slate-700 mb-1">🔑 Token 凭证 (推荐)</label>
+            <input type="password" id="tokenInput" placeholder="输入 Token" class="w-full p-2.5 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none">
+          </div>
+          <div class="relative flex py-1 items-center">
+            <div class="flex-grow border-t border-slate-200"></div>
+            <span class="flex-shrink mx-4 text-xs text-slate-400">或通过账号密码登录</span>
+            <div class="flex-grow border-t border-slate-200"></div>
+          </div>
+          <div class="grid grid-cols-2 gap-3">
+            <div>
+              <label class="block text-xs font-medium text-slate-600 mb-1">手机号</label>
+              <input type="text" id="phoneInput" placeholder="全阅读手机号" class="w-full p-2 border border-slate-300 rounded-lg text-sm">
+            </div>
+            <div>
+              <label class="block text-xs font-medium text-slate-600 mb-1">密码</label>
+              <input type="password" id="passInput" placeholder="密码" class="w-full p-2 border border-slate-300 rounded-lg text-sm">
+            </div>
+          </div>
+        </div>
+
+        <!-- 时间选择与通用标准 -->
+        <div class="bg-white p-6 rounded-xl shadow-sm border border-slate-200 space-y-4">
+          <h2 class="font-semibold text-slate-800 border-b pb-2">2. 统计时间与兜底标准</h2>
+          
+          <div>
+            <label class="block text-sm font-medium text-slate-700 mb-2">统计周期</label>
+            <div class="flex gap-4 text-sm">
+              <label class="flex items-center gap-1 cursor-pointer"><input type="radio" name="period" value="today" checked> 今日</label>
+              <label class="flex items-center gap-1 cursor-pointer"><input type="radio" name="period" value="week"> 本周</label>
+              <label class="flex items-center gap-1 cursor-pointer"><input type="radio" name="period" value="month"> 本月</label>
+            </div>
+          </div>
+
+          <div class="grid grid-cols-3 gap-3 pt-2">
+            <div>
+              <label class="block text-xs font-medium text-slate-600 mb-1">默认听音(分)</label>
+              <input type="number" id="defListen" value="60" class="w-full p-2 border border-slate-300 rounded-lg text-sm">
+            </div>
+            <div>
+              <label class="block text-xs font-medium text-slate-600 mb-1">默认动画(分)</label>
+              <input type="number" id="defAnim" value="15" class="w-full p-2 border border-slate-300 rounded-lg text-sm">
+            </div>
+            <div>
+              <label class="block text-xs font-medium text-slate-600 mb-1">默认绘本(本)</label>
+              <input type="number" id="defBooks" value="2" class="w-full p-2 border border-slate-300 rounded-lg text-sm">
+            </div>
+          </div>
+
+          <button id="generateBtn" onclick="handleGenerate()" class="w-full py-3 bg-blue-600 hover:bg-blue-700 text-white font-medium rounded-lg shadow transition duration-200">
+            ⚡ 一键生成所有班级打卡报告
+          </button>
+        </div>
+      </div>
+
+      <!-- 右侧：班级与映射配置 -->
+      <div class="bg-white p-6 rounded-xl shadow-sm border border-slate-200 space-y-4">
+        <h2 class="font-semibold text-slate-800 border-b pb-2">3. ⚙️ 班级规则与映射配置</h2>
+        
+        <div class="flex gap-2">
+          <input type="text" id="newClassName" placeholder="班级名称，如：康乐E4" class="flex-1 p-2 border border-slate-300 rounded-lg text-sm">
+          <button onclick="addClass()" class="px-4 py-2 bg-slate-800 hover:bg-slate-900 text-white text-sm rounded-lg">添加班级</button>
+        </div>
+
+        <div id="classList" class="space-y-4 max-h-[450px] overflow-y-auto pr-1">
+          <!-- 动态班级列表 -->
+        </div>
+      </div>
+
+    </div>
+
+    <!-- 结果输出 -->
+    <div id="resultContainer" class="bg-white p-6 rounded-xl shadow-sm border border-slate-200 hidden space-y-6">
+      <h2 class="font-semibold text-slate-800 border-b pb-2">📋 打卡报告生成结果</h2>
+      <div id="outputArea" class="space-y-6"></div>
+    </div>
+  </div>
+
+  <script>
+    // 本地存储管理
+    let config = {
+      token: localStorage.getItem('read_token') || '',
+      classes: JSON.parse(localStorage.getItem('read_classes') || '{}')
+    };
+
+    document.getElementById('tokenInput').value = config.token;
+
+    document.getElementById('tokenInput').addEventListener('input', (e) => {
+      config.token = e.target.value.trim();
+      localStorage.setItem('read_token', config.token);
+    });
+
+    function saveClasses() {
+      localStorage.setItem('read_classes', JSON.stringify(config.classes));
+    }
+
+    function renderClasses() {
+      const container = document.getElementById('classList');
+      container.innerHTML = '';
+      
+      const keys = Object.keys(config.classes);
+      if (keys.length === 0) {
+        container.innerHTML = '<p class="text-sm text-slate-400 py-4 text-center">暂未添加特定班级配置，将全额使用通用默认标准。</p>';
+        return;
+      }
+
+      keys.forEach(className => {
+        const item = config.classes[className];
+        const card = document.createElement('div');
+        card.className = 'p-4 border border-slate-200 rounded-lg bg-slate-50 space-y-3';
+        card.innerHTML = `
+          <div class="flex justify-between items-center">
+            <span class="font-medium text-slate-800">📍 ${className}</span>
+            <button onclick="removeClass('${className}')" class="text-xs text-red-500 hover:underline">删除</button>
+          </div>
+          <div class="grid grid-cols-3 gap-2">
+            <div>
+              <label class="block text-[11px] text-slate-500">听音(分)</label>
+              <input type="number" value="${item.listen}" onchange="updateClassRule('${className}', 'listen', this.value)" class="w-full p-1 border rounded text-xs">
+            </div>
+            <div>
+              <label class="block text-[11px] text-slate-500">动画(分)</label>
+              <input type="number" value="${item.anim}" onchange="updateClassRule('${className}', 'anim', this.value)" class="w-full p-1 border rounded text-xs">
+            </div>
+            <div>
+              <label class="block text-[11px] text-slate-500">绘本(本)</label>
+              <input type="number" value="${item.books}" onchange="updateClassRule('${className}', 'books', this.value)" class="w-full p-1 border rounded text-xs">
+            </div>
+          </div>
+          <div>
+            <label class="block text-[11px] text-slate-500 mb-1">英文名映射 (中文:英文, 逗号隔开)</label>
+            <textarea onchange="updateClassRule('${className}', 'map', this.value)" placeholder="例如：陈羿安:Luca, 周滢萱:Yisan" class="w-full p-1.5 border rounded text-xs h-12">${item.map || ''}</textarea>
+          </div>
+        `;
+        container.appendChild(card);
+      });
+    }
+
+    function addClass() {
+      const input = document.getElementById('newClassName');
+      const name = input.value.trim();
+      if (name && !config.classes[name]) {
+        config.classes[name] = { listen: 60, anim: 15, books: 2, map: '' };
+        saveClasses();
+        renderClasses();
+        input.value = '';
+      }
+    }
+
+    function removeClass(name) {
+      delete config.classes[name];
+      saveClasses();
+      renderClasses();
+    }
+
+    function updateClassRule(className, field, value) {
+      if (field === 'map') {
+        config.classes[className].map = value;
+      } else {
+        config.classes[className][field] = parseInt(value) || 0;
+      }
+      saveClasses();
+    }
+
+    // 辅助工具函数
+    function parseNameMap(mapStr) {
+      const mapping = {};
+      if (!mapStr) return mapping;
+      const pairs = mapStr.split(/[,，\n]/);
+      pairs.forEach(pair => {
+        if (pair.includes(':') || pair.includes('：')) {
+          const [k, v] = pair.split(/[:：]/);
+          if (k && v) mapping[k.trim()] = v.trim();
+        }
+      });
+      return mapping;
+    }
+
+    function cleanNum(val) {
+      if (!val) return 0;
+      const match = String(val).match(/\d+/);
+      return match ? parseInt(match[0]) : 0;
+    }
+
+    // 打卡生成核心逻辑
+    async function handleGenerate() {
+      const btn = document.getElementById('generateBtn');
+      let token = config.token;
+      const phone = document.getElementById('phoneInput').value.trim();
+      const pass = document.getElementById('passInput').value.trim();
+
+      btn.disabled = true;
+      btn.innerText = '⚡ 正在处理中...';
+
+      try {
+        // 自动登录获取 Token
+        if (phone && pass) {
+          const loginResp = await fetch("https://v2.ireadabc.com/api/login", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ phone, password: pass })
+          });
+          const loginRes = await loginResp.json();
+          token = loginRes?.data?.token || loginRes?.token;
+          if (token) {
+            config.token = token;
+            document.getElementById('tokenInput').value = token;
+            localStorage.setItem('read_token', token);
+          } else {
+            alert('登录失败，请检查账号密码');
+            btn.disabled = false;
+            btn.innerText = '⚡ 一键生成所有班级打卡报告';
+            return;
+          }
+        }
+
+        if (!token) {
+          alert('请先输入 Token 或登录账号！');
+          btn.disabled = false;
+          btn.innerText = '⚡ 一键生成所有班级打卡报告';
+          return;
+        }
+
+        // 获取班级列表
+        const classResp = await fetch("https://v2.ireadabc.com/api/v3/reports/classes/all", {
+          headers: { "Token": token, "Client-Type": "BROWSER" }
+        });
+        const classJson = await classResp.json();
+        let classesData = classJson.data || classJson;
+
+        if (!Array.isArray(classesData)) {
+          classesData = [
+            { id: "17985", name: "康乐E4" },
+            { id: "17988", name: "康乐K11" },
+            { id: "27935", name: "康乐K24" },
+            { id: "49420", name: "康乐K31" }
+          ];
+        }
+
+        // 日期计算
+        const today = new Date();
+        let sDate = today.toISOString().split('T')[0];
+        let eDate = sDate;
+        let dateTitle = "今日";
+
+        const period = document.querySelector('input[name="period"]:checked').value;
+        if (period === 'week') {
+          const day = today.getDay() || 7;
+          const monday = new Date(today);
+          monday.setDate(today.getDate() - day + 1);
+          sDate = monday.toISOString().split('T')[0];
+          dateTitle = "本周";
+        } else if (period === 'month') {
+          sDate = new Date(today.getFullYear(), today.getMonth(), 1).toISOString().split('T')[0];
+          dateTitle = "本月";
+        }
+
+        const defRule = {
+          listen: parseInt(document.getElementById('defListen').value) || 0,
+          anim: parseInt(document.getElementById('defAnim').value) || 0,
+          books: parseInt(document.getElementById('defBooks').value) || 0,
+        };
+
+        const outputArea = document.getElementById('outputArea');
+        outputArea.innerHTML = '';
+
+        for (const cItem of classesData) {
+          const cId = cItem.id || cItem.class_id;
+          const cName = cItem.name || cItem.class_name || `班级_${cId}`;
+
+          const statResp = await fetch(`https://v2.ireadabc.com/api/v3/reports/statistics/class/${cId}?start=${sDate}&end=${eDate}`, {
+            headers: { "Token": token, "Client-Type": "BROWSER" }
+          });
+          const statJson = await statResp.json();
+          let students = statJson.data?.list || statJson.data || [];
+
+          // 匹配规则与映射
+          let rule = defRule;
+          let nameMapStr = '';
+          for (const key in config.classes) {
+            if (cName.includes(key) || key.includes(cName)) {
+              rule = config.classes[key];
+              nameMapStr = config.classes[key].map;
+              break;
+            }
+          }
+
+          const mapping = parseNameMap(nameMapStr);
+          const tops = [], mids = [], zeros = [];
+
+          students.forEach(s => {
+            const rawName = s.name || s.student_name || '';
+            const cleanName = rawName.replace(/[a-zA-Z\s]/g, '');
+            const engName = mapping[cleanName] || mapping[rawName] || rawName;
+
+            const l = cleanNum(s.listen || s.audio_time);
+            const a = cleanNum(s.anim || s.video_time);
+            const b = cleanNum(s.book || s.book_count);
+
+            if (l >= rule.listen && a >= rule.anim && b >= rule.books) {
+              tops.push(`${engName} (听音${l}min, 动画${a}min, 绘本${b}本)`);
+            } else if (l === 0 && a === 0 && b === 0) {
+              zeros.push(engName);
+            } else {
+              const missing = [];
+              if (l < rule.listen) missing.push(`听音${rule.listen - l}min`);
+              if (a < rule.anim) missing.push(`动画${rule.anim - a}min`);
+              if (b < rule.books) missing.push(`绘本${rule.books - b}本`);
+              mids.push(`${engName}：已达标 (距离全勤还缺：${missing.join(', ')})`);
+            }
+          });
+
+          const mdText = `[以下为${dateTitle}的打卡情况]
+
+🏆 ${cName}
+
+🌟【今日光荣榜】
+${tops.join('\n') || '（暂无）'}
+
+💪【再努努力】
+${mids.join('\n\n') || '（无）'}
+
+⏰【该起床打卡啦】
+${zeros.join('\n\n') || '（无）'}`;
+
+          const block = document.createElement('div');
+          block.className = 'bg-slate-50 p-4 rounded-lg border border-slate-200 space-y-2';
+          block.innerHTML = `
+            <div class="flex justify-between items-center">
+              <h3 class="font-bold text-slate-800">📍 班级：${cName}</h3>
+              <button onclick="navigator.clipboard.writeText(\`${mdText.replace(/`/g, '\\`')}\`); alert('已复制到剪贴板！')" class="px-3 py-1 bg-white border border-slate-300 rounded text-xs hover:bg-slate-100">📋 一键复制文本</button>
+            </div>
+            <pre class="bg-white p-3 rounded border text-xs text-slate-700 whitespace-pre-wrap font-mono">${mdText}</pre>
+          `;
+          outputArea.appendChild(block);
+        }
+
+        document.getElementById('resultContainer').classList.remove('hidden');
+
+      } catch (err) {
+        alert('获取数据失败，错误信息: ' + err.message);
+      } finally {
+        btn.disabled = false;
+        btn.innerText = '⚡ 一键生成所有班级打卡报告';
+      }
+    }
+
+    // 初始化渲染
+    renderClasses();
+  </script>
+</body>
+</html>
