@@ -4,6 +4,7 @@ import urllib.parse
 from datetime import datetime, date, timedelta
 import requests
 import streamlit as st
+import streamlit.components.v1 as components
 
 # ==================== 1. 页面配置 ====================
 st.set_page_config(page_title="全阅读学情打卡生成器", page_icon="⚡", layout="centered")
@@ -260,15 +261,13 @@ def fetch_data_via_api(auth_token, report_type, start_date, end_date, class_rule
 # ==================== 4. 界面展示 ====================
 st.subheader("1. 身份凭证与时间选择")
 
-# 重置按钮：清空状态与 URL 参数后直接用原生 st.rerun() 刷新
+# 重置按钮：通过 JS 彻底清空 URL 参数并重新加载干净的页面
 if st.button("🧹 退出当前账号 / 清除缓存重置", type="secondary"):
-    st.session_state.token = ""
-    st.session_state.class_rules = {}
-    st.session_state.name_maps = {}
-    st.session_state.custom_template = default_template
-    for key in list(st.query_params.keys()):
-        del st.query_params[key]
-    st.rerun()
+    components.html("""
+        <script>
+            window.parent.location.href = window.parent.location.origin + window.parent.location.pathname;
+        </script>
+    """, height=0)
 
 login_tab1, login_tab2 = st.tabs(["🔐 账号密码登录", "🔑 Token 凭证"])
 with login_tab1:
