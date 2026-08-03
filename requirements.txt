@@ -2,3 +2,4 @@ streamlit
 playwright
 pandas
 requests
+streamlit-local-storage
