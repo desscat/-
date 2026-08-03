@@ -98,12 +98,13 @@ def generate_markdown(class_name, date_title, student_list, req_listen, req_anim
 
 # ==================== 3. 自动登录与 API 抓取逻辑 ====================
 def auto_login(username, password):
-    """自动使用账号密码向服务器获取 Token"""
-    login_url = "https://v2.ireadabc.com/api/v3/auth/login"
+    """自动使用账号密码向真实接口获取 Token"""
+    login_url = "https://v2.ireadabc.com/api/login"
     payload = {
         "username": username,
         "password": password,
-        "mobile": username
+        "mobile": username,
+        "account": username
     }
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
@@ -114,15 +115,17 @@ def auto_login(username, password):
         resp = requests.post(login_url, json=payload, headers=headers, timeout=10)
         if resp.status_code == 200:
             res = resp.json()
-            data = res.get("data", {})
-            # 兼容提取 Token
-            token = data.get("token") or data.get("access_token") or res.get("token")
+            # 兼容多种数据返回格式，精准提取 token
+            data = res.get("data", {}) if isinstance(res.get("data"), dict) else {}
+            token = data.get("token") or data.get("access_token") or res.get("token") or res.get("access_token")
+            
             if token:
                 return token, None
             else:
-                return None, res.get("msg") or "登录失败，未能成功提取凭证"
+                msg = res.get("msg") or res.get("message") or "登录未返回凭证，请检查账号或密码是否正确"
+                return None, msg
         else:
-            return None, f"登录失败，状态码：{resp.status_code}，请检查账号密码"
+            return None, f"登录失败，服务器返回状态码：{resp.status_code}"
     except Exception as e:
         return None, f"网络连接异常：{str(e)}"
 
@@ -137,7 +140,7 @@ def fetch_data_via_api(auth_token, report_type, start_date, end_date, class_rule
     reports_dict = {}
 
     try:
-        # 1. 尝试获取班级列表
+        # 1. 获取班级列表
         classes_url = "https://v2.ireadabc.com/api/v3/reports/classes/all" 
         resp = requests.get(classes_url, headers=headers, timeout=10)
         
@@ -146,7 +149,7 @@ def fetch_data_via_api(auth_token, report_type, start_date, end_date, class_rule
             res_json = resp.json()
             classes_data = res_json.get("data", []) if isinstance(res_json, dict) else res_json
 
-        # 2. 静态精准兜底配置
+        # 2. 静态精准兜底配置（结合已有班级 ID 与名称）
         if not classes_data or not isinstance(classes_data, list):
             classes_data = [
                 {"id": "17985", "name": "康乐E4"},
@@ -223,7 +226,6 @@ col_left, col_right = st.columns([1, 1])
 with col_left:
     st.subheader("1. 登录与时间选择")
     
-    # 登录方式切换标签页
     login_tab1, login_tab2 = st.tabs(["🔐 账号密码登录", "🔑 Token 凭证登录"])
     
     with login_tab1:
@@ -330,19 +332,18 @@ with col_right:
 if submit_button:
     current_token = st.session_state.token
     
-    # 如果用户输入了账号密码，先执行自动登录
     if username_input and password_input:
         with st.spinner("🔑 正在自动登录全阅读账号..."):
             login_token, login_err = auto_login(username_input, password_input)
             if login_err:
-                st.error(f"❌ {login_err}")
+                st.error(f"❌ 登录遇到问题：{login_err}")
             else:
                 current_token = login_token
                 st.session_state.token = login_token
-                st.success("✅ 登录成功！正在抓取班级数据...")
+                st.success("✅ 登录成功！")
 
     if not current_token:
-        st.warning("⚠️ 请先输入账号密码或粘贴 Token！")
+        st.warning("⚠️ 请输入有效的账号密码或粘贴 Token 凭证！")
     else:
         with st.spinner("⚡ 正在获取所有班级数据..."):
             reports, err = fetch_data_via_api(
@@ -353,7 +354,7 @@ if submit_button:
             if err:
                 st.error(f"❌ 获取失败：{err}")
             elif reports:
-                st.success(f"🎉 成功一次性生成 {len(reports)} 个班级的打卡报告！")
+                st.success(f"🎉 成功生成 {len(reports)} 个班级的打卡报告！")
                 st.divider()
                 st.subheader("📋 各班级打卡报告预览")
                 
