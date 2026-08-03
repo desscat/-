@@ -13,7 +13,7 @@ IREAD_PWD = os.environ.get("IREAD_PWD", "你的全阅读密码")
 
 # 班级考核标准配置（根据你的实际班级修改）
 CLASS_RULES_CONFIG = {
-    "康乐E4": {"listen": 60, "anim": 15, "books": 2},
+    "康乐E4": {"listen": 40, "anim": 15, "books": 2},
     "康乐K11": {"listen": 60, "anim": 15, "books": 2},
     "康乐K24": {"listen": 60, "anim": 15, "books": 2},
     "康乐K31": {"listen": 60, "anim": 15, "books": 2},
