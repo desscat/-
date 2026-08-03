@@ -5,6 +5,7 @@ import time
 import subprocess
 from datetime import datetime, date, timedelta
 import streamlit as st
+from streamlit_localstorage import LocalStorage
 
 # 自动补全驱动
 try:
@@ -18,17 +19,35 @@ except ImportError:
 st.set_page_config(page_title="全阅读学情打卡生成器", page_icon="📚", layout="wide")
 
 st.title("📚 全阅读学情打卡生成器")
-st.caption("支持动态识别班级、自定义英文名映射、多班级独立考核标准及本地配置保持")
+st.caption("支持动态识别班级、自定义英文名映射、多班级独立考核标准及账号密码浏览器本地永久记忆")
 
-# ==================== 2. Session状态持久化初始化 ====================
-if "saved_username" not in st.session_state:
-    st.session_state.saved_username = ""
-if "saved_password" not in st.session_state:
-    st.session_state.saved_password = ""
+# 初始化本地存储组件
+localS = LocalStorage()
+
+# 从浏览器本地存储中加载持久化数据
+stored_username = localS.getItem("iread_username") or ""
+stored_password = localS.getItem("iread_password") or ""
+stored_rules_json = localS.getItem("iread_class_rules")
+stored_maps_json = localS.getItem("iread_name_maps")
+
+# ==================== 2. Session状态初始化 ====================
 if "class_rules" not in st.session_state:
-    st.session_state.class_rules = {}
+    if stored_rules_json:
+        try:
+            st.session_state.class_rules = json.loads(stored_rules_json)
+        except:
+            st.session_state.class_rules = {}
+    else:
+        st.session_state.class_rules = {}
+
 if "name_maps" not in st.session_state:
-    st.session_state.name_maps = {}
+    if stored_maps_json:
+        try:
+            st.session_state.name_maps = json.loads(stored_maps_json)
+        except:
+            st.session_state.name_maps = {}
+    else:
+        st.session_state.name_maps = {}
 
 # ==================== 工具函数 ====================
 def parse_name_map(map_str):
@@ -286,13 +305,25 @@ col_left, col_right = st.columns([1, 1])
 
 with col_left:
     st.subheader("1. 账号与时间选择")
+    
+    # 绑定回调函数：当你在输入框输入时，自动实时存入浏览器本地
+    def save_username_callback():
+        localS.setItem("iread_username", st.session_state.user_input_key)
+
+    def save_password_callback():
+        localS.setItem("iread_password", st.session_state.pwd_input_key)
+
     col1, col2 = st.columns(2)
     with col1:
-        user_input = st.text_input("📱 账号", value=st.session_state.saved_username, placeholder="请输入全阅读账号", key="user_input_key")
-        st.session_state.saved_username = user_input
+        user_input = st.text_input("📱 账号", value=stored_username, placeholder="请输入全阅读账号", key="user_input_key", on_change=save_username_callback)
     with col2:
-        pwd_input = st.text_input("🔒 密码", value=st.session_state.saved_password, type="password", placeholder="请输入密码", key="pwd_input_key")
-        st.session_state.saved_password = pwd_input
+        pwd_input = st.text_input("🔒 密码", value=stored_password, type="password", placeholder="请输入密码", key="pwd_input_key", on_change=save_password_callback)
+
+    # 兼容没有触发 on_change 的情况，也同步写一次
+    if user_input and user_input != stored_username:
+        localS.setItem("iread_username", user_input)
+    if pwd_input and pwd_input != stored_password:
+        localS.setItem("iread_password", pwd_input)
 
     report_type = st.radio("选择统计周期：", ["今日汇报", "周汇报", "月汇报", "自定义"], horizontal=True)
 
@@ -326,6 +357,8 @@ with col_right:
         if new_class_input and new_class_input not in st.session_state.class_rules:
             st.session_state.class_rules[new_class_input] = {"listen": 60, "anim": 15, "books": 2}
             st.session_state.name_maps[new_class_input] = ""
+            localS.setItem("iread_class_rules", json.dumps(st.session_state.class_rules, ensure_ascii=False))
+            localS.setItem("iread_name_maps", json.dumps(st.session_state.name_maps, ensure_ascii=False))
             st.success(f"已成功添加班级：{new_class_input}")
             st.rerun()
 
@@ -345,6 +378,8 @@ with col_right:
                         del st.session_state.class_rules[c_name]
                         if c_name in st.session_state.name_maps:
                             del st.session_state.name_maps[c_name]
+                        localS.setItem("iread_class_rules", json.dumps(st.session_state.class_rules, ensure_ascii=False))
+                        localS.setItem("iread_name_maps", json.dumps(st.session_state.name_maps, ensure_ascii=False))
                         st.rerun()
 
                 c1, c2, c3 = st.columns(3)
@@ -359,15 +394,17 @@ with col_right:
                                    value=st.session_state.name_maps.get(c_name, ""), 
                                    key=f"m_{c_name}", height=65, placeholder="例如：张三:Tom, 李四:Jerry")
                 
-                # 实时同步回 session_state 确保刷新不丢失
                 st.session_state.class_rules[c_name] = {"listen": l_v, "anim": a_v, "books": b_v}
                 st.session_state.name_maps[c_name] = n_m
                 
                 class_rules_config[c_name] = {"listen": l_v, "anim": a_v, "books": b_v}
                 name_maps_config[c_name] = n_m
                 st.divider()
+            
+            localS.setItem("iread_class_rules", json.dumps(st.session_state.class_rules, ensure_ascii=False))
+            localS.setItem("iread_name_maps", json.dumps(st.session_state.name_maps, ensure_ascii=False))
 
-    st.markdown("##### 📁 本地配置文件 (导出/导入保存)")
+    st.markdown("##### 📁 本地配置文件 (导出/导入备份)")
     export_data = json.dumps({"rules": st.session_state.class_rules, "maps": st.session_state.name_maps}, ensure_ascii=False, indent=2)
     
     col_exp, col_imp = st.columns(2)
@@ -380,6 +417,8 @@ with col_right:
             config_data = json.load(uploaded_file)
             st.session_state.class_rules = config_data.get("rules", {})
             st.session_state.name_maps = config_data.get("maps", {})
+            localS.setItem("iread_class_rules", json.dumps(st.session_state.class_rules, ensure_ascii=False))
+            localS.setItem("iread_name_maps", json.dumps(st.session_state.name_maps, ensure_ascii=False))
             st.success("✅ 配置恢复成功！")
             st.rerun()
         except Exception:
