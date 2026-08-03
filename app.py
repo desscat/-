@@ -1,54 +1,50 @@
 import json
 import re
+import urllib.parse
 from datetime import datetime, date, timedelta
 import requests
 import streamlit as st
-from streamlit_local_storage import LocalStorage
 
 # ==================== 1. 页面配置 ====================
 st.set_page_config(page_title="全阅读学情打卡生成器", page_icon="⚡", layout="wide")
 
 st.title("⚡ 全阅读学情打卡生成器")
-st.caption("已启用浏览器 LocalStorage：各自手机独立记忆账号与班级配置，刷新不丢失")
 
-# 初始化本地存储对象
-local_storage = LocalStorage()
+# 读取 URL 参数中的持久化数据
+query_params = st.query_params
 
-# 安全读取函数
-def safe_get_item(key_name):
-    try:
-        val = local_storage.getItem(key_name)
-        if isinstance(val, dict):
-            return val.get("value")
-        return val
-    except Exception:
-        return None
-
-# 从浏览器本地存储获取持久化数据
-stored_token = safe_get_item("read_app_token") or ""
-stored_rules = safe_get_item("read_app_rules")
-stored_maps = safe_get_item("read_app_maps")
+stored_token = query_params.get("token", "")
+stored_rules = query_params.get("rules", "")
+stored_maps = query_params.get("maps", "")
 
 # 解析 JSON 规则
 try:
-    init_rules = json.loads(stored_rules) if stored_rules else {}
+    init_rules = json.loads(urllib.parse.unquote(stored_rules)) if stored_rules else {}
 except Exception:
     init_rules = {}
 
 try:
-    init_maps = json.loads(stored_maps) if stored_maps else {}
+    init_maps = json.loads(urllib.parse.unquote(stored_maps)) if stored_maps else {}
 except Exception:
     init_maps = {}
 
 # Session 状态同步
-if "class_rules" not in st.session_state or not st.session_state.class_rules:
+if "class_rules" not in st.session_state:
     st.session_state.class_rules = init_rules
 
-if "name_maps" not in st.session_state or not st.session_state.name_maps:
+if "name_maps" not in st.session_state:
     st.session_state.name_maps = init_maps
 
-if "token" not in st.session_state or not st.session_state.token:
+if "token" not in st.session_state:
     st.session_state.token = stored_token
+
+# 同步并更新当前的 URL 参数
+def update_url_params():
+    rules_str = urllib.parse.quote(json.dumps(st.session_state.class_rules, ensure_ascii=False))
+    maps_str = urllib.parse.quote(json.dumps(st.session_state.name_maps, ensure_ascii=False))
+    st.query_params["token"] = st.session_state.token
+    st.query_params["rules"] = rules_str
+    st.query_params["maps"] = maps_str
 
 # ==================== 工具函数 ====================
 def parse_name_map(map_str):
@@ -250,10 +246,7 @@ with col_left:
         token_input = st.text_input("🔑 Token 凭证", value=st.session_state.token, type="password", placeholder="粘贴 Token 凭证")
         if token_input != st.session_state.token:
             st.session_state.token = token_input
-            try:
-                local_storage.setItem("read_app_token", token_input)
-            except Exception:
-                pass
+            update_url_params()
 
     st.write("")
     report_type = st.radio("选择统计周期：", ["今日汇报", "周汇报", "月汇报", "自定义"], horizontal=True)
@@ -288,13 +281,7 @@ with col_right:
         if new_class_input and new_class_input not in st.session_state.class_rules:
             st.session_state.class_rules[new_class_input] = {"listen": 60, "anim": 15, "books": 2}
             st.session_state.name_maps[new_class_input] = ""
-            
-            try:
-                local_storage.setItem("read_app_rules", json.dumps(st.session_state.class_rules))
-                local_storage.setItem("read_app_maps", json.dumps(st.session_state.name_maps))
-            except Exception:
-                pass
-            
+            update_url_params()
             st.success(f"已成功添加班级：{new_class_input}")
             st.rerun()
 
@@ -302,7 +289,7 @@ with col_right:
     name_maps_config = {}
 
     if not st.session_state.class_rules:
-        st.info("💡 提示：在此配置好班级信息后，会自动记在当前手机/电脑上，下次刷新不会丢失。")
+        st.info("💡 提示：配置好班级后，浏览器地址栏链接会自动更新，收藏当前链接即可永久保存状态！")
     else:
         with st.expander("📋 各班级【英文名映射】与【考核标准】配置列表", expanded=True):
             for c_name in list(st.session_state.class_rules.keys()):
@@ -314,12 +301,7 @@ with col_right:
                         del st.session_state.class_rules[c_name]
                         if c_name in st.session_state.name_maps:
                             del st.session_state.name_maps[c_name]
-                        
-                        try:
-                            local_storage.setItem("read_app_rules", json.dumps(st.session_state.class_rules))
-                            local_storage.setItem("read_app_maps", json.dumps(st.session_state.name_maps))
-                        except Exception:
-                            pass
+                        update_url_params()
                         st.rerun()
 
                 c1, c2, c3 = st.columns(3)
@@ -341,6 +323,8 @@ with col_right:
                 name_maps_config[c_name] = n_m
                 st.divider()
 
+            update_url_params()
+
     st.markdown("##### 📁 配置导出与恢复 (跨设备共享)")
     export_data = json.dumps({"rules": st.session_state.class_rules, "maps": st.session_state.name_maps}, ensure_ascii=False, indent=2)
     
@@ -354,13 +338,7 @@ with col_right:
             config_data = json.load(uploaded_file)
             st.session_state.class_rules = config_data.get("rules", {})
             st.session_state.name_maps = config_data.get("maps", {})
-            
-            try:
-                local_storage.setItem("read_app_rules", json.dumps(st.session_state.class_rules))
-                local_storage.setItem("read_app_maps", json.dumps(st.session_state.name_maps))
-            except Exception:
-                pass
-            
+            update_url_params()
             st.success("✅ 配置加载成功！")
             st.rerun()
         except Exception:
@@ -378,11 +356,8 @@ if submit_button:
             else:
                 current_token = login_token
                 st.session_state.token = login_token
-                try:
-                    local_storage.setItem("read_app_token", login_token)
-                except Exception:
-                    pass
-                st.success("✅ 登录成功，Token 已记住在本地！")
+                update_url_params()
+                st.success("✅ 登录成功，Token 已记住在链接中！")
 
     if not current_token:
         st.warning("⚠️ 请输入有效的账号密码或粘贴 Token 凭证！")
