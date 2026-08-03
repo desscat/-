@@ -1,9 +1,27 @@
 import os
 import re
 import json
+import subprocess
 from datetime import datetime, date, timedelta
 import streamlit as st
-from playwright.sync_api import sync_playwright
+
+# ==================== 0. 自动补全/安装 Playwright 核心驱动 ====================
+try:
+    from playwright.sync_api import sync_playwright
+except ImportError:
+    subprocess.run(["pip", "install", "playwright"])
+    subprocess.run(["playwright", "install", "chromium"])
+    from playwright.sync_api import sync_playwright
+
+# 确保在云端每次启动时，如果内核不存在，强制自动下载一次
+@st.cache_resource(show_spinner=False)
+def install_playwright_browser():
+    try:
+        subprocess.run(["playwright", "install", "chromium"], check=True)
+    except Exception as e:
+        print(f"Browser install note: {e}")
+
+install_playwright_browser()
 
 # ==================== 1. 页面配置 ====================
 st.set_page_config(page_title="全阅读学情打卡生成器", page_icon="📚", layout="wide")
@@ -104,23 +122,18 @@ def run_automation_web(username, password, report_type, start_date, end_date, cl
     reports_dict = {}
 
     with sync_playwright() as p:
-        status_placeholder.info("🚀 正在启动云端后台浏览器...")
+        status_placeholder.info("🚀 正在启动云端浏览器...")
         
-        # 优先使用系统自带的 chromium 路径，保证云端稳定运行
-        browser_args = {
-            "headless": True,
-            "args": [
+        browser = p.chromium.launch(
+            headless=True,
+            args=[
                 "--no-sandbox",
                 "--disable-setuid-sandbox",
                 "--disable-dev-shm-usage",
                 "--disable-accelerated-2d-canvas",
                 "--disable-gpu"
             ]
-        }
-        if os.path.exists("/usr/bin/chromium"):
-            browser_args["executable_path"] = "/usr/bin/chromium"
-
-        browser = p.chromium.launch(**browser_args)
+        )
         context = browser.new_context(viewport={"width": 1920, "height": 1080})
         page = context.new_page()
 
