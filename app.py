@@ -136,45 +136,60 @@ def run_automation_web(username, password, report_type, start_date, end_date, cl
                 "--disable-gpu"
             ]
         )
-        context = browser.new_context(viewport={"width": 1920, "height": 1080})
+        context = browser.new_context(
+            viewport={"width": 1920, "height": 1080},
+            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        )
         page = context.new_page()
 
         try:
             status_placeholder.info("🔑 正在打开全阅读登录页面...")
-            page.goto(login_url, wait_until="domcontentloaded", timeout=60000)
-            
-            # 精准定位可见输入框并输入账号密码
+            page.goto(login_url, wait_until="networkidle", timeout=60000)
             page.wait_for_selector("input", timeout=20000)
-            page.wait_for_timeout(1000)
-            
-            inputs = page.locator("input:visible").all()
+            page.wait_for_timeout(1500)
+
+            # 1. 智能填写账号密码（双重保障：点击模拟键盘 + JS派发input事件触发Vue/React绑定）
+            inputs = page.query_selector_all("input")
             if len(inputs) >= 2:
+                # 处理账号输入框
                 inputs[0].click()
                 inputs[0].fill(username)
+                page.evaluate("""([el, val]) => {
+                    el.value = val;
+                    el.dispatchEvent(new Event('input', { bubbles: true }));
+                    el.dispatchEvent(new Event('change', { bubbles: true }));
+                }""", [inputs[0], username])
                 page.wait_for_timeout(300)
-                
+
+                # 处理密码输入框
                 inputs[1].click()
                 inputs[1].fill(password)
+                page.evaluate("""([el, val]) => {
+                    el.value = val;
+                    el.dispatchEvent(new Event('input', { bubbles: true }));
+                    el.dispatchEvent(new Event('change', { bubbles: true }));
+                }""", [inputs[1], password])
                 page.wait_for_timeout(300)
 
-            # 勾选协议
+            # 2. 勾选同意协议（如果存在）
             try:
-                checkbox = page.locator("input[type='checkbox']")
-                if checkbox.count() > 0 and not checkbox.is_checked():
+                checkbox = page.query_selector("input[type='checkbox']")
+                if checkbox and not checkbox.is_checked():
                     checkbox.click()
                     page.wait_for_timeout(300)
-            except:
+            except Exception:
                 pass
 
-            # 点击登录
-            login_btn = page.locator("button, .el-button--primary").filter(has_text=re.compile("登录"))
-            if login_btn.count() > 0:
-                login_btn.first.click()
+            # 3. 点击登录按钮
+            login_btn = page.query_selector("button, .el-button, div[role='button']")
+            if login_btn:
+                login_btn.click()
             else:
                 page.keyboard.press("Enter")
-                
+
             page.wait_for_timeout(2000)
 
+            # 4. 处理可能弹出的协议或确认弹窗
             try:
                 modal_agree_btn = page.query_selector(".el-message-box .el-button--primary, .el-dialog .el-button--primary")
                 if modal_agree_btn:
@@ -184,7 +199,7 @@ def run_automation_web(username, password, report_type, start_date, end_date, cl
                 pass
 
             status_placeholder.info("⏳ 正在进入班级列表...")
-            page.wait_for_selector("tbody tr", timeout=25000)
+            page.wait_for_selector("tbody tr", timeout=30000)
             status_placeholder.success("✅ 登录成功！开始抓取数据...")
 
             rows = page.query_selector_all("tbody tr")
@@ -309,7 +324,7 @@ def run_automation_web(username, password, report_type, start_date, end_date, cl
             try:
                 screenshot_bytes = page.screenshot(type="png")
                 st.session_state.last_error_screenshot = screenshot_bytes
-            except:
+            except Exception:
                 st.session_state.last_error_screenshot = None
             browser.close()
             raise Exception(f"抓取中断，详细原因：{str(err)}")
