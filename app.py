@@ -2,13 +2,17 @@ import os
 import re
 import json
 import time
+import subprocess
 from datetime import datetime, date, timedelta
 import streamlit as st
 
-# 自动在 Streamlit 云端安装 Playwright 浏览器内核
-os.system("playwright install chromium")
-
-from playwright.sync_api import sync_playwright
+# 云端自动补全下载 Chromium 驱动
+try:
+    from playwright.sync_api import sync_playwright
+except ImportError:
+    subprocess.run(["pip", "install", "playwright"])
+    subprocess.run(["playwright", "install", "chromium"])
+    from playwright.sync_api import sync_playwright
 
 # ==================== 1. 页面配置 ====================
 st.set_page_config(page_title="全阅读学情打卡生成器", page_icon="📚", layout="wide")
@@ -31,7 +35,6 @@ if "name_maps" not in st.session_state:
         "康乐K24": "王誉泽:Sky, 陈少熙:Rebecca, 陈弘毅:Eason, 何奕锐:Ray, 兰雅心:Miya, 吴震声:Jimmy, 郑梓歆:Cherry, 王雨彤:Raina"
     }
 
-
 def parse_name_map(map_str):
     mapping = {}
     if not map_str:
@@ -43,27 +46,25 @@ def parse_name_map(map_str):
             mapping[key.strip()] = val.strip()
     return mapping
 
-
 def clean_num(text):
     nums = re.findall(r'\d+', str(text))
     return int(nums[0]) if nums else 0
-
 
 def process_student_data(class_name, name, listen, anim, books, req_listen, req_anim, req_books, name_map_str):
     listen = clean_num(listen)
     anim = clean_num(anim)
     books = clean_num(books)
-
+    
     clean_name = re.sub(r'[a-zA-Z\s]', '', name)
     class_mapping = parse_name_map(name_map_str)
     eng_name = class_mapping.get(clean_name, class_mapping.get(name, name))
-
+    
     if listen >= req_listen and anim >= req_anim and books >= req_books:
         return "TOP", f"{eng_name} (听音{listen}min, 动画{anim}min, 绘本{books}本)"
-
+    
     if listen == 0 and anim == 0 and books == 0:
         return "ZERO", f"{eng_name}"
-
+    
     missing = []
     if listen < req_listen:
         missing.append(f"听音{req_listen - listen}min")
@@ -71,10 +72,9 @@ def process_student_data(class_name, name, listen, anim, books, req_listen, req_
         missing.append(f"动画{req_anim - anim}min")
     if books < req_books:
         missing.append(f"绘本{req_books - books}本")
-
+        
     missing_str = ", ".join(missing)
     return "MID", f"{eng_name}：已达标 (距离全勤还缺：{missing_str})"
-
 
 def generate_markdown(class_name, date_title, student_list, req_listen, req_anim, req_books, name_map_str):
     tops, mids, zeros = [], [], []
@@ -89,11 +89,11 @@ def generate_markdown(class_name, date_title, student_list, req_listen, req_anim
             mids.append(text)
         else:
             zeros.append(text)
-
+            
     tops_formatted = "\n".join(tops) if tops else "（暂无）"
     mids_formatted = "\n\n".join(mids) if mids else "（无）"
     zeros_formatted = "\n\n".join(zeros) if zeros else "（无）"
-
+    
     return f"""[以下为{date_title}的打卡情况]
 
 🏆 {class_name}
@@ -108,24 +108,34 @@ def generate_markdown(class_name, date_title, student_list, req_listen, req_anim
 {zeros_formatted}
 """
 
-
-# ==================== 3. 核心无头抓取逻辑 ====================
-def run_automation_web(username, password, report_type, start_date, end_date, class_rules_config, name_maps_config,
-                       default_rule, status_placeholder):
+# ==================== 3. 核心无头抓取逻辑 (针对云端/手机优化) ====================
+def run_automation_web(username, password, report_type, start_date, end_date, class_rules_config, name_maps_config, default_rule, status_placeholder):
     login_url = "https://v2.ireadabc.com/#/admin/classes/index"
     all_reports = []
 
     with sync_playwright() as p:
         status_placeholder.info("🚀 正在启动后台程序...")
-        browser = p.chromium.launch(headless=True)
-        context = browser.new_context()
+        
+        # 低内存防崩溃参数配置
+        browser = p.chromium.launch(
+            headless=True,
+            args=[
+                "--no-sandbox",
+                "--disable-setuid-sandbox",
+                "--disable-dev-shm-usage",
+                "--disable-accelerated-2d-canvas",
+                "--disable-gpu"
+            ]
+        )
+        # 强制桌面版 1920x1080 视口，防止被网页识认为是移动端导致布局错乱
+        context = browser.new_context(viewport={"width": 1920, "height": 1080})
         page = context.new_page()
 
         # 1. 登录
         status_placeholder.info("🔑 正在打开登录页面...")
-        page.goto(login_url)
-        page.wait_for_selector("input", timeout=15000)
-
+        page.goto(login_url, wait_until="domcontentloaded")
+        page.wait_for_selector("input", timeout=20000)
+        
         inputs = page.query_selector_all("input[type='text'], input[type='password'], input:not([type='checkbox'])")
         if len(inputs) >= 2:
             inputs[0].fill(username)
@@ -139,8 +149,9 @@ def run_automation_web(username, password, report_type, start_date, end_date, cl
         login_button = page.query_selector("button:has-text('登录'), .el-button--primary")
         if login_button:
             login_button.click()
-            page.wait_for_timeout(1000)
+            page.wait_for_timeout(1500)
 
+        # 处理可能出现的全阅读协议遮罩弹窗
         try:
             modal_agree_btn = page.query_selector(".el-message-box .el-button--primary, .el-dialog .el-button--primary")
             if modal_agree_btn:
@@ -152,7 +163,7 @@ def run_automation_web(username, password, report_type, start_date, end_date, cl
             pass
 
         status_placeholder.info("⏳ 正在验证登录...")
-        page.wait_for_selector("text=班级管理", timeout=20000)
+        page.wait_for_selector("text=班级管理", timeout=25000)
         status_placeholder.success("✅ 登录成功！开始抓取班级学情数据...")
 
         if report_type == "今日汇报":
@@ -164,6 +175,8 @@ def run_automation_web(username, password, report_type, start_date, end_date, cl
         else:
             date_title = f"{start_date.strftime('%Y-%m-%d')} 至 {end_date.strftime('%Y-%m-%d')}"
 
+        # 等待表格完全载入
+        page.wait_for_selector("tbody tr", timeout=15000)
         rows = page.query_selector_all("tbody tr")
         class_count = len(rows)
 
@@ -172,32 +185,32 @@ def run_automation_web(username, password, report_type, start_date, end_date, cl
             if i >= len(rows):
                 break
             row = rows[i]
-
-            # 正确获取第三列（班级名称列：序号在2，班级名在3）
+            
+            # 第三列为班级名称
             class_name_elem = row.query_selector("td:nth-child(3)")
             if not class_name_elem:
                 continue
             class_name = class_name_elem.inner_text().strip()
-
-            status_placeholder.info(f"📊 正在处理班级：{class_name} ({i + 1}/{class_count})...")
-
+            
+            status_placeholder.info(f"📊 正在处理班级：{class_name} ({i+1}/{class_count})...")
+            
             stat_btn = row.query_selector("text=学情统计")
             if stat_btn:
                 stat_btn.click()
-                page.wait_for_timeout(2500)
-
+                page.wait_for_timeout(3000)
+                
                 # --- 日期/Tab 切换逻辑 ---
                 if report_type in ["今日汇报", "周汇报", "月汇报"]:
                     tab_elem = page.query_selector(f"text={report_type}")
                     if tab_elem:
                         tab_elem.click()
-                        page.wait_for_timeout(2000)
+                        page.wait_for_timeout(2500)
                 elif report_type == "自定义":
                     custom_tab = page.query_selector("text=自定义")
                     if custom_tab:
                         custom_tab.click()
-                        page.wait_for_timeout(1000)
-
+                        page.wait_for_timeout(1500)
+                    
                     date_inputs = page.query_selector_all(".el-range-input, input[placeholder*='日期']")
                     if len(date_inputs) >= 2:
                         date_inputs[0].click()
@@ -211,19 +224,20 @@ def run_automation_web(username, password, report_type, start_date, end_date, cl
                         page.keyboard.press("Backspace")
                         date_inputs[1].type(end_date.strftime("%Y-%m-%d"))
                         page.wait_for_timeout(300)
-
+                        
                         page.keyboard.press("Enter")
                         page.wait_for_timeout(500)
-
+                    
                     search_btn = page.query_selector("button:has-text('查看')")
                     if search_btn:
                         search_btn.click()
-                        page.wait_for_timeout(2500)
+                        page.wait_for_timeout(3000)
 
-                # --- 抓取表格数据 ---
+                # --- 抓取学生表格数据 ---
+                page.wait_for_selector("tbody tr", timeout=10000)
                 student_rows = page.query_selector_all("tbody tr")
                 students_data = []
-
+                
                 for s_row in student_rows:
                     cols = s_row.query_selector_all("td")
                     if len(cols) >= 5:
@@ -231,18 +245,18 @@ def run_automation_web(username, password, report_type, start_date, end_date, cl
                         s_listen = cols[2].inner_text().strip() or "0"
                         s_anim = cols[3].inner_text().strip() or "0"
                         s_books = cols[4].inner_text().strip() or "0"
-
+                        
                         students_data.append({
                             "name": s_name,
                             "listen": s_listen,
                             "anim": s_anim,
                             "books": s_books
                         })
-
+                
                 # 匹配班级专属标准
                 matched_rule = None
                 matched_name_map = ""
-
+                
                 for key in class_rules_config:
                     if key in class_name or class_name in key:
                         matched_rule = class_rules_config[key]
@@ -258,17 +272,15 @@ def run_automation_web(username, password, report_type, start_date, end_date, cl
                 req_listen = matched_rule["listen"]
                 req_anim = matched_rule["anim"]
                 req_books = matched_rule["books"]
-
-                md_res = generate_markdown(class_name, date_title, students_data, req_listen, req_anim, req_books,
-                                           matched_name_map)
+                
+                md_res = generate_markdown(class_name, date_title, students_data, req_listen, req_anim, req_books, matched_name_map)
                 all_reports.append(md_res)
-
+                
                 page.go_back()
-                page.wait_for_timeout(2000)
+                page.wait_for_timeout(2500)
 
         browser.close()
         return "\n\n" + ("=" * 40) + "\n\n".join(all_reports)
-
 
 # ==================== 4. 前端交互界面 ====================
 col_left, col_right = st.columns([1, 1])
@@ -307,8 +319,7 @@ with col_left:
 
 with col_right:
     st.subheader("3. ⚙️ 班级管理与个性化配置")
-
-    # 动态新增班级按钮
+    
     new_class_input = st.text_input("➕ 输入要添加或修改的班级名称：", placeholder="例如：康乐K25")
     if st.button("添加班级配置"):
         if new_class_input and new_class_input not in st.session_state.class_rules:
@@ -316,7 +327,6 @@ with col_right:
             st.session_state.name_maps[new_class_input] = ""
             st.success(f"已成功添加班级：{new_class_input}")
 
-    # 显示各个班级的独立配置
     class_rules_config = {}
     name_maps_config = {}
 
@@ -325,28 +335,23 @@ with col_right:
             st.markdown(f"#### 📍 班级：{c_name}")
             c1, c2, c3 = st.columns(3)
             with c1:
-                l_v = st.number_input(f"听音(分)", value=st.session_state.class_rules[c_name]["listen"], step=5,
-                                      key=f"l_{c_name}")
+                l_v = st.number_input(f"听音(分)", value=st.session_state.class_rules[c_name]["listen"], step=5, key=f"l_{c_name}")
             with c2:
-                a_v = st.number_input(f"动画(分)", value=st.session_state.class_rules[c_name]["anim"], step=5,
-                                      key=f"a_{c_name}")
+                a_v = st.number_input(f"动画(分)", value=st.session_state.class_rules[c_name]["anim"], step=5, key=f"a_{c_name}")
             with c3:
-                b_v = st.number_input(f"绘本(本)", value=st.session_state.class_rules[c_name]["books"], step=1,
-                                      key=f"b_{c_name}")
-
-            n_m = st.text_area(f"英文名映射 (格式：中文名:英文名，用逗号隔开)",
-                               value=st.session_state.name_maps.get(c_name, ""),
+                b_v = st.number_input(f"绘本(本)", value=st.session_state.class_rules[c_name]["books"], step=1, key=f"b_{c_name}")
+            
+            n_m = st.text_area(f"英文名映射 (格式：中文名:英文名，用逗号隔开)", 
+                               value=st.session_state.name_maps.get(c_name, ""), 
                                key=f"m_{c_name}", height=65)
-
+            
             class_rules_config[c_name] = {"listen": l_v, "anim": a_v, "books": b_v}
             name_maps_config[c_name] = n_m
             st.divider()
 
-    # 导出/导入配置文件功能（方便共享给其他人）
     st.markdown("##### 📁 配置共享 (供其他人使用)")
     export_data = json.dumps({"rules": class_rules_config, "maps": name_maps_config}, ensure_ascii=False, indent=2)
-    st.download_button("📥 导出当前配置文件 (config.json)", data=export_data, file_name="class_config.json",
-                       mime="application/json")
+    st.download_button("📥 导出当前配置文件 (config.json)", data=export_data, file_name="class_config.json", mime="application/json")
 
     uploaded_file = st.file_uploader("📂 导入配置 JSON 文件", type=["json"])
     if uploaded_file is not None:
@@ -367,20 +372,22 @@ if submit_button:
         try:
             with st.spinner("数据抓取中，请稍候..."):
                 final_result = run_automation_web(
-                    user_input, pwd_input, report_type, start_date, end_date,
+                    user_input, pwd_input, report_type, start_date, end_date, 
                     class_rules_config, name_maps_config, default_rule, status
                 )
-                status.success("🎉 打卡报告生成完毕！")
-
-                st.subheader("📋 报告内容：")
-                st.text_area("复制结果", value=final_result, height=450)
-
-                today_file = f"{datetime.now().strftime('%Y-%m-%d')}_{report_type}_打卡反馈.md"
-                st.download_button(
-                    label="📥 下载 Markdown 文件",
-                    data=final_result,
-                    file_name=today_file,
-                    mime="text/markdown"
-                )
+                if final_result.strip():
+                    status.success("🎉 打卡报告生成完毕！")
+                    st.subheader("📋 报告内容：")
+                    st.text_area("复制结果", value=final_result, height=450)
+                    
+                    today_file = f"{datetime.now().strftime('%Y-%m-%d')}_{report_type}_打卡反馈.md"
+                    st.download_button(
+                        label="📥 下载 Markdown 文件",
+                        data=final_result,
+                        file_name=today_file,
+                        mime="text/markdown"
+                    )
+                else:
+                    status.error("⚠️ 未能获取到有效的班级数据，请检查账号密码或网页是否响应。")
         except Exception as e:
             status.error(f"❌ 运行遇到错误：{str(e)}")
