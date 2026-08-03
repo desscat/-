@@ -97,7 +97,7 @@ if __name__ == "__main__":
     scheduler = BlockingScheduler()
     
     # ⏱️ 设置每天晚上 21:00 自动运行（可自行调整 hour 和 minute）
-    scheduler.add_job(execute_daily_report, 'cron', hour=21, minute=0)
+    scheduler.add_job(execute_daily_report, 'cron', hour=14, minute=3)
     
     print("🚀 定时任务服务已启动！")
     print("📅 任务设定：每天 21:00 自动抓取并推送至微信。")
