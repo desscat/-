@@ -100,10 +100,10 @@ def generate_markdown(class_name, date_title, student_list, req_listen, req_anim
 {zeros_formatted}
 """
 
-# ==================== 3. 核心抓取逻辑（增强稳定性与日志） ====================
+# ==================== 3. 核心抓取逻辑（返回班级报告列表） ====================
 def run_automation_web(username, password, report_type, start_date, end_date, class_rules_config, name_maps_config, default_rule, status_placeholder):
     login_url = "https://v2.ireadabc.com/#/admin/classes/index"
-    all_reports = []
+    reports_dict = {}  # 改为字典：{"班级名": "报告内容"}
 
     with sync_playwright() as p:
         status_placeholder.info("🚀 正在启动云端后台浏览器...")
@@ -162,7 +162,7 @@ def run_automation_web(username, password, report_type, start_date, end_date, cl
             if class_count == 0:
                 status_placeholder.warning("⚠️ 登录成功，但在该账号下没有找到任何班级。")
                 browser.close()
-                return ""
+                return {}
 
             for i in range(class_count):
                 page.wait_for_selector("tbody tr", timeout=10000)
@@ -191,17 +191,14 @@ def run_automation_web(username, password, report_type, start_date, end_date, cl
                             tab_elem.click()
                             page.wait_for_timeout(3000)
                     else:
-                        # 针对“今日汇报”或“自定义”，强制走自定义时间框筛选，并保证稳定抓取
                         date_title = f"{start_date.strftime('%m月%d日')}"
                         
-                        # 1. 点击“自定义”标签
                         try:
                             page.click("text=自定义", timeout=5000)
                         except:
                             pass
                         page.wait_for_timeout(1500)
                         
-                        # 2. 定位并填充开始和结束日期输入框
                         try:
                             date_inputs = page.locator(".el-range-input").all()
                             if len(date_inputs) < 2:
@@ -225,7 +222,6 @@ def run_automation_web(username, password, report_type, start_date, end_date, cl
                         except Exception as e:
                             print(f"[WARN] 填入日期异常: {e}")
                         
-                        # 3. 点击“查看”按钮
                         try:
                             page.click("button:has-text('查看')", timeout=5000)
                         except:
@@ -273,13 +269,13 @@ def run_automation_web(username, password, report_type, start_date, end_date, cl
                     req_books = matched_rule["books"]
                     
                     md_res = generate_markdown(class_name, date_title, students_data, req_listen, req_anim, req_books, matched_name_map)
-                    all_reports.append(md_res)
+                    reports_dict[class_name] = md_res
                     
                     page.go_back()
                     page.wait_for_timeout(2500)
 
             browser.close()
-            return "\n\n" + ("=" * 40) + "\n\n".join(all_reports)
+            return reports_dict
 
         except Exception as err:
             browser.close()
@@ -381,7 +377,7 @@ with col_right:
         except Exception:
             st.error("导入失败，文件格式有误。")
 
-# ==================== 5. 执行逻辑 ====================
+# ==================== 5. 执行逻辑（分班级独立展示与复制） ====================
 if submit_button:
     if not user_input or not pwd_input:
         st.warning("⚠️ 请先填写账号和密码！")
@@ -389,20 +385,38 @@ if submit_button:
         status = st.empty()
         try:
             with st.spinner("正在后台为您抓取数据，请稍候..."):
-                final_result = run_automation_web(
+                reports_dict = run_automation_web(
                     user_input, pwd_input, report_type, start_date, end_date, 
                     class_rules_config, name_maps_config, default_rule, status
                 )
-                if final_result and final_result.strip():
-                    status.success("🎉 打卡报告生成完毕！")
-                    st.subheader("📋 报告内容：")
-                    st.text_area("复制结果", value=final_result, height=450)
+                
+                if reports_dict:
+                    status.success(f"🎉 成功获取 {len(reports_dict)} 个班级的打卡报告！")
+                    st.divider()
+                    st.subheader("📋 各班级独立打卡报告（可单独查看与复制）")
                     
-                    today_file = f"{datetime.now().strftime('%Y-%m-%d')}_{report_type}_打卡反馈.md"
+                    # 循环为每个班级生成独立的输入框和下载按钮
+                    for c_name, c_content in reports_dict.items():
+                        with st.container():
+                            st.markdown(f"### 📍 班级：`{c_name}`")
+                            st.text_area(f"点击右上方即可复制 - {c_name}", value=c_content, height=220, key=f"area_{c_name}")
+                            
+                            c_file_name = f"{datetime.now().strftime('%Y-%m-%d')}_{c_name}_打卡反馈.md"
+                            st.download_button(
+                                label=f"📥 下载【{c_name}】Markdown报告",
+                                data=c_content,
+                                file_name=c_file_name,
+                                mime="text/markdown",
+                                key=f"dl_{c_name}"
+                            )
+                            st.markdown("---")
+                    
+                    # 同时提供一个打包下载所有班级的完整文件按钮
+                    all_text = "\n\n" + ("=" * 40) + "\n\n".join(reports_dict.values())
                     st.download_button(
-                        label="📥 下载 Markdown 文件",
-                        data=final_result,
-                        file_name=today_file,
+                        label="📦 一键打包下载所有班级报告 (Markdown)",
+                        data=all_text,
+                        file_name=f"{datetime.now().strftime('%Y-%m-%d')}_全部班级打卡反馈.md",
                         mime="text/markdown"
                     )
                 else:
