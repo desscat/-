@@ -179,29 +179,41 @@ def fetch_data_via_api(auth_token, report_type, start_date, end_date, class_rule
                 {"id": "49420", "name": "康乐K31"}
             ]
 
-        # 确切日期计算（不出现模糊词汇）
+        # 日期范围与天数计算
+        days_count = 1
         if report_type == "昨日汇报":
             yest = date.today() - timedelta(days=1)
             s_date = yest.strftime("%Y-%m-%d")
             e_date = s_date
             date_title = yest.strftime("%m月%d日")
+            days_count = 1
         elif report_type == "周汇报":
-            s_date = (date.today() - timedelta(days=date.today().weekday())).strftime("%Y-%m-%d")
-            e_date = date.today().strftime("%Y-%m-%d")
+            d_start = date.today() - timedelta(days=date.today().weekday())
+            d_end = date.today()
+            s_date = d_start.strftime("%Y-%m-%d")
+            e_date = d_end.strftime("%Y-%m-%d")
             date_title = f"{s_date}至{e_date}"
+            days_count = (d_end - d_start).days + 1
         elif report_type == "月汇报":
-            s_date = date.today().replace(day=1).strftime("%Y-%m-%d")
-            e_date = date.today().strftime("%Y-%m-%d")
+            d_start = date.today().replace(day=1)
+            d_end = date.today()
+            s_date = d_start.strftime("%Y-%m-%d")
+            e_date = d_end.strftime("%Y-%m-%d")
             date_title = f"{s_date}至{e_date}"
+            days_count = (d_end - d_start).days + 1
         elif report_type == "自定义时间":
             s_date = start_date.strftime("%Y-%m-%d")
             e_date = end_date.strftime("%Y-%m-%d")
             date_title = f"{s_date}至{e_date}" if s_date != e_date else start_date.strftime("%m月%d日")
+            days_count = (end_date - start_date).days + 1
+            if days_count < 1:
+                days_count = 1
         else:
             yest = date.today() - timedelta(days=1)
             s_date = yest.strftime("%Y-%m-%d")
             e_date = s_date
             date_title = yest.strftime("%m月%d日")
+            days_count = 1
 
         for item in classes_data:
             class_id = str(item.get("id") or item.get("class_id"))
@@ -226,7 +238,14 @@ def fetch_data_via_api(auth_token, report_type, start_date, end_date, class_rule
                         "books": s.get("book") or s.get("book_count") or 0
                     })
 
-                matched_rule = next((class_rules_config[k] for k in class_rules_config if k in class_name or class_name in k), default_rule)
+                base_rule = next((class_rules_config[k] for k in class_rules_config if k in class_name or class_name in k), default_rule)
+                # 根据天数自动乘倍
+                matched_rule = {
+                    "listen": base_rule["listen"] * days_count,
+                    "anim": base_rule["anim"] * days_count,
+                    "books": base_rule["books"] * days_count
+                }
+
                 matched_name_map = next((name_maps_config[k] for k in name_maps_config if k in class_name or class_name in k), "")
 
                 md_res = generate_custom_report(
@@ -257,21 +276,21 @@ report_type = st.radio("选择统计周期：", ["昨日汇报", "周汇报", "�
 
 start_date, end_date = date.today(), date.today()
 if report_type == "自定义时间":
-    st.info("📅 请选择开始和结束日期：")
+    st.info("📅 请选择开始和结束日期（跨多天时，要求标准会自动按天数乘以倍数）：")
     col_d1, col_d2 = st.columns(2)
     with col_d1:
         start_date = st.date_input("开始日期", value=date.today() - timedelta(days=1))
     with col_d2:
         end_date = st.date_input("结束日期", value=date.today())
 
-st.subheader("2. 通用兜底标准")
+st.subheader("2. 通用兜底标准（每日基准）")
 col_g1, col_g2, col_g3 = st.columns(3)
 with col_g1:
-    def_listen = st.number_input("默认听音(分)", value=60, step=5)
+    def_listen = st.number_input("每日默认听音(分)", value=60, step=5)
 with col_g2:
-    def_anim = st.number_input("默认动画(分)", value=15, step=5)
+    def_anim = st.number_input("每日默认动画(分)", value=15, step=5)
 with col_g3:
-    def_books = st.number_input("默认绘本(本)", value=2, step=1)
+    def_books = st.number_input("每日默认绘本(本)", value=2, step=1)
 default_rule = {"listen": def_listen, "anim": def_anim, "books": def_books}
 
 st.subheader("3. 🎨 DIY 自定义报告模板样式")
@@ -318,9 +337,9 @@ for c_name in list(st.session_state.class_rules.keys()):
             st.rerun()
 
     c1, c2, c3 = st.columns(3)
-    l_v = c1.number_input(f"听音", value=st.session_state.class_rules[c_name]["listen"], step=5, key=f"l_{c_name}")
-    a_v = c2.number_input(f"动画", value=st.session_state.class_rules[c_name]["anim"], step=5, key=f"a_{c_name}")
-    b_v = c3.number_input(f"绘本", value=st.session_state.class_rules[c_name]["books"], step=1, key=f"b_{c_name}")
+    l_v = c1.number_input(f"每日听音", value=st.session_state.class_rules[c_name]["listen"], step=5, key=f"l_{c_name}")
+    a_v = c2.number_input(f"每日动画", value=st.session_state.class_rules[c_name]["anim"], step=5, key=f"a_{c_name}")
+    b_v = c3.number_input(f"每日绘本", value=st.session_state.class_rules[c_name]["books"], step=1, key=f"b_{c_name}")
     
     n_m = st.text_area(f"映射 (中文:英文)", value=st.session_state.name_maps.get(c_name, ""), key=f"m_{c_name}", height=65)
     
