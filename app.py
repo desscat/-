@@ -1,11 +1,12 @@
 import json
+import os
 import re
 from datetime import datetime, date, timedelta
 import requests
 import streamlit as st
 
 # ==================== 1. 页面配置 ====================
-st.set_page_config(page_title="全阅读学情打卡生成器 (自动登录版)", page_icon="⚡", layout="wide")
+st.set_page_config(page_title="全阅读学情打卡生成器", page_icon="⚡", layout="wide")
 
 st.title("⚡ 全阅读学情打卡生成器")
 st.caption("输入账号密码即可一键登录并生成所有班级的打卡报告")
@@ -98,17 +99,23 @@ def generate_markdown(class_name, date_title, student_list, req_listen, req_anim
 
 # ==================== 3. 自动登录与 API 抓取逻辑 ====================
 def auto_login(username, password):
-    """自动使用账号密码向真实接口获取 Token"""
+    """根据浏览器真实 Request Payload 还原登录逻辑"""
     login_url = "https://v2.ireadabc.com/api/login"
+    
+    # 严格匹配全阅读真实参数：phone 与 password
     payload = {
-        "account": username,
-        "password": password
+        "phone": str(username).strip(),
+        "password": str(password).strip()
     }
+    
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
         "Content-Type": "application/json;charset=UTF-8",
-        "Accept": "application/json, text/plain, */*"
+        "Accept": "application/json, text/plain, */*",
+        "Origin": "https://v2.ireadabc.com",
+        "Referer": "https://v2.ireadabc.com/"
     }
+    
     try:
         resp = requests.post(login_url, json=payload, headers=headers, timeout=10)
         if resp.status_code == 200:
@@ -119,7 +126,7 @@ def auto_login(username, password):
             if token:
                 return token, None
             else:
-                msg = res.get("msg") or res.get("message") or res.get("error") or "账号或密码有误，未提取到登录凭证"
+                msg = res.get("msg") or res.get("message") or res.get("error") or f"账号或密码不匹配，未提取到登录凭证"
                 return None, msg
         else:
             return None, f"登录失败，服务器返回状态码：{resp.status_code}"
@@ -226,11 +233,11 @@ with col_left:
     login_tab1, login_tab2 = st.tabs(["🔐 账号密码登录", "🔑 Token 凭证登录"])
     
     with login_tab1:
-        username_input = st.text_input("👤 手机号 / 账号", placeholder="请输入全阅读登录账号")
+        username_input = st.text_input("👤 手机号 / 账号", placeholder="请输入全阅读手机号")
         password_input = st.text_input("🔒 密码", type="password", placeholder="请输入密码")
         
     with login_tab2:
-        token_input = st.text_input("🔑 Token 凭证", value=st.session_state.token, type="password", placeholder="可粘贴 F12 中的 Token")
+        token_input = st.text_input("🔑 Token 凭证", value=st.session_state.token, type="password", placeholder="粘贴 Token 凭证")
         if token_input:
             st.session_state.token = token_input
 
