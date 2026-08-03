@@ -3,7 +3,7 @@ import time
 import requests
 from datetime import datetime, date, timedelta
 
-# 引入之前 app.py 中的抓取和生成逻辑
+# 引入 app.py 中的抓取和生成逻辑
 from app import run_automation_web, generate_markdown
 
 # ==================== 1. 配置参数（优先从 GitHub 环境变量读取） ====================
@@ -13,13 +13,15 @@ IREAD_PWD = os.environ.get("IREAD_PWD", "你的全阅读密码")
 
 # 班级考核标准配置（根据你的实际班级修改）
 CLASS_RULES_CONFIG = {
-    "康乐K25": {"listen": 60, "anim": 15, "books": 2},
-    # "其他班级": {"listen": 60, "anim": 15, "books": 2}
+    "康乐E4": {"listen": 60, "anim": 15, "books": 2},
+    "康乐K11": {"listen": 60, "anim": 15, "books": 2},
+    "康乐K24": {"listen": 60, "anim": 15, "books": 2},
+    "康乐K31": {"listen": 60, "anim": 15, "books": 2},
 }
 
-# 英文名映射配置
+# 英文名映射配置（如果没有映射可以留空）
 NAME_MAPS_CONFIG = {
-    "康乐K25": "张三:Tom, 李四:Jerry"
+    "康乐E4": ""
 }
 
 # 通用兜底标准
@@ -64,11 +66,11 @@ def execute_daily_report():
     yesterday = date.today() - timedelta(days=1)
     
     try:
-        # 执行抓取，将开始和结束日期都设为【昨天】
+        # 执行抓取，将 report_type 设为 "自定义"，并将开始和结束都设为【昨天】
         report_text = run_automation_web(
             username=IREAD_USER,
             password=IREAD_PWD,
-            report_type="今日汇报",
+            report_type="自定义",
             start_date=yesterday,
             end_date=yesterday,
             class_rules_config=CLASS_RULES_CONFIG,
@@ -95,5 +97,4 @@ def execute_daily_report():
 
 # ==================== 4. 主入口 ====================
 if __name__ == "__main__":
-    # 如果是在 GitHub Actions 中运行，直接执行一次任务并退出
     execute_daily_report()
