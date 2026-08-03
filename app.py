@@ -13,19 +13,19 @@ st.title("⚡ 全阅读学情打卡生成器")
 # 读取 URL 参数中的持久化数据
 query_params = st.query_params
 
-stored_token = query_params.get("token", "")
-stored_rules = query_params.get("rules", "")
-stored_maps = query_params.get("maps", "")
-stored_template = query_params.get("template", "")
+stored_token = query_params.get("token", "")[cite: 1]
+stored_rules = query_params.get("rules", "")[cite: 1]
+stored_maps = query_params.get("maps", "")[cite: 1]
+stored_template = query_params.get("template", "")[cite: 1]
 
-# 解析 JSON 规则
+# 解析 JSON 尔规则
 try:
-    init_rules = json.loads(urllib.parse.unquote(stored_rules)) if stored_rules else {}
+    init_rules = json.loads(urllib.parse.unquote(stored_rules)) if stored_rules else {}[cite: 1]
 except Exception:
     init_rules = {}
 
 try:
-    init_maps = json.loads(urllib.parse.unquote(stored_maps)) if stored_maps else {}
+    init_maps = json.loads(urllib.parse.unquote(stored_maps)) if stored_maps else {}[cite: 1]
 except Exception:
     init_maps = {}
 
@@ -261,6 +261,13 @@ def fetch_data_via_api(auth_token, report_type, start_date, end_date, class_rule
 
 # ==================== 4. 界面展示 ====================
 st.subheader("1. 身份凭证与时间选择")
+
+# 增加重置按钮（用于清理分享链接带来的缓存和旧班级数据）
+if st.button("🧹 退出当前账号 / 清除缓存重置"):
+    st.session_state.clear()
+    st.query_params.clear()
+    st.success("✨ 缓存已清空，页面已重置！")
+    st.rerun()
 
 login_tab1, login_tab2 = st.tabs(["🔐 账号密码登录", "🔑 Token 凭证"])
 with login_tab1:
