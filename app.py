@@ -18,9 +18,13 @@ except ImportError:
 st.set_page_config(page_title="全阅读学情打卡生成器", page_icon="📚", layout="wide")
 
 st.title("📚 全阅读学情打卡生成器")
-st.caption("支持动态识别班级、自定义英文名映射、多班级独立考核标准及本地配置保存")
+st.caption("支持动态识别班级、自定义英文名映射、多班级独立考核标准及本地配置保持")
 
-# ==================== 2. Session状态初始化 ====================
+# ==================== 2. Session状态持久化初始化 ====================
+if "saved_username" not in st.session_state:
+    st.session_state.saved_username = ""
+if "saved_password" not in st.session_state:
+    st.session_state.saved_password = ""
 if "class_rules" not in st.session_state:
     st.session_state.class_rules = {}
 if "name_maps" not in st.session_state:
@@ -284,9 +288,11 @@ with col_left:
     st.subheader("1. 账号与时间选择")
     col1, col2 = st.columns(2)
     with col1:
-        user_input = st.text_input("📱 账号", placeholder="请输入全阅读账号", key="user_input_key")
+        user_input = st.text_input("📱 账号", value=st.session_state.saved_username, placeholder="请输入全阅读账号", key="user_input_key")
+        st.session_state.saved_username = user_input
     with col2:
-        pwd_input = st.text_input("🔒 密码", type="password", placeholder="请输入密码", key="pwd_input_key")
+        pwd_input = st.text_input("🔒 密码", value=st.session_state.saved_password, type="password", placeholder="请输入密码", key="pwd_input_key")
+        st.session_state.saved_password = pwd_input
 
     report_type = st.radio("选择统计周期：", ["今日汇报", "周汇报", "月汇报", "自定义"], horizontal=True)
 
@@ -321,6 +327,7 @@ with col_right:
             st.session_state.class_rules[new_class_input] = {"listen": 60, "anim": 15, "books": 2}
             st.session_state.name_maps[new_class_input] = ""
             st.success(f"已成功添加班级：{new_class_input}")
+            st.rerun()
 
     class_rules_config = {}
     name_maps_config = {}
@@ -352,12 +359,16 @@ with col_right:
                                    value=st.session_state.name_maps.get(c_name, ""), 
                                    key=f"m_{c_name}", height=65, placeholder="例如：张三:Tom, 李四:Jerry")
                 
+                # 实时同步回 session_state 确保刷新不丢失
+                st.session_state.class_rules[c_name] = {"listen": l_v, "anim": a_v, "books": b_v}
+                st.session_state.name_maps[c_name] = n_m
+                
                 class_rules_config[c_name] = {"listen": l_v, "anim": a_v, "books": b_v}
                 name_maps_config[c_name] = n_m
                 st.divider()
 
     st.markdown("##### 📁 本地配置文件 (导出/导入保存)")
-    export_data = json.dumps({"rules": class_rules_config, "maps": name_maps_config}, ensure_ascii=False, indent=2)
+    export_data = json.dumps({"rules": st.session_state.class_rules, "maps": st.session_state.name_maps}, ensure_ascii=False, indent=2)
     
     col_exp, col_imp = st.columns(2)
     with col_exp:
@@ -370,10 +381,11 @@ with col_right:
             st.session_state.class_rules = config_data.get("rules", {})
             st.session_state.name_maps = config_data.get("maps", {})
             st.success("✅ 配置恢复成功！")
+            st.rerun()
         except Exception:
             st.error("导入失败，文件格式有误。")
 
-# ==================== 5. 执行逻辑（干净整洁的单行一键复制卡片） ====================
+# ==================== 5. 执行逻辑 ====================
 if submit_button:
     if not user_input or not pwd_input:
         st.warning("⚠️ 请先填写账号和密码！")
@@ -395,12 +407,11 @@ if submit_button:
                         with st.container():
                             st.markdown(f"#### 📍 班级：{c_name}")
                             
-                            # 只保留一个自带一键复制按钮的代码块，左右两侧对齐下载按钮
                             c_col1, c_col2 = st.columns([3, 1])
                             with c_col1:
                                 st.code(c_content, language=None)
                             with c_col2:
-                                st.write("") # 占位对齐
+                                st.write("") 
                                 st.write("")
                                 c_file_name = f"{datetime.now().strftime('%Y-%m-%d')}_{c_name}_打卡反馈.md"
                                 st.download_button(
