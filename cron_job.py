@@ -94,21 +94,18 @@ def execute_daily_report():
 
 # ==================== 4. 定时任务调度器 ====================
 if __name__ == "__main__":
+    # ⚠️ 【测试阶段】：先取消下面这行的注释（删掉开头的 # 号），这样运行代码就会【立刻执行一次】抓取和推送！
+    # execute_daily_report()
+
     scheduler = BlockingScheduler()
     
-    # ⏱️ 设置每天晚上 21:00 自动运行（可自行调整 hour 和 minute）
+    # ⏱️ 设置每天定时运行（例如每天 14:30 运行）
     scheduler.add_job(execute_daily_report, 'cron', hour=14, minute=30)
     
     print("🚀 定时任务服务已启动！")
-    print("📅 任务设定：每天 21:00 自动抓取并推送至微信。")
-    print("💡 (提示：如果想立即测试一次，可以解除下方 execute_daily_report() 的注释)")
+    print("📅 任务设定：每天 14:30 自动抓取并推送至微信。")
     
-    # execute_daily_report() # 取消此行注释即可启动后立即测试一次
-if __name__ == "__main__":
-    # 解除下面这行的注释，运行脚本时会【立刻执行一次】抓取与推送
-    execute_daily_report() 
-
-    # 之后的定时任务保持不变
-    scheduler = BlockingScheduler()
-    scheduler.add_job(execute_daily_report, 'cron', hour=20, minute=30)
-    scheduler.start()
+    try:
+        scheduler.start()
+    except (KeyboardInterrupt, SystemExit):
+        print("\n定时任务已停止。")
