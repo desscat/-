@@ -41,6 +41,9 @@ if "username" not in st.session_state:
 if "password" not in st.session_state:
     st.session_state.password = ""
 
+if "last_error_screenshot" not in st.session_state:
+    st.session_state.last_error_screenshot = None
+
 # ==================== 工具函数 ====================
 def parse_name_map(map_str):
     mapping = {}
@@ -290,9 +293,10 @@ def run_automation_web(username, password, report_type, start_date, end_date, cl
 
         except Exception as err:
             try:
-                page.screenshot(path="error.png")
+                screenshot_bytes = page.screenshot(type="png")
+                st.session_state.last_error_screenshot = screenshot_bytes
             except:
-                pass
+                st.session_state.last_error_screenshot = None
             browser.close()
             raise Exception(f"抓取中断，详细原因：{str(err)}")
 
@@ -449,15 +453,9 @@ if submit_button:
                     )
                 else:
                     status.error("⚠️ 未能获取到任何有效数据，请确认输入的账号密码是否正确。")
-       except Exception as err:
-            screenshot_bytes = None
-            try:
-                # 让 Playwright 直接把截图保存为二进制数据，而不是存文件
-                screenshot_bytes = page.screenshot(type="png")
-            except:
-                pass
-            browser.close()
-            
-            # 把截图存进 session_state，等下在前端显示出来
-            st.session_state.last_error_screenshot = screenshot_bytes
-            raise Exception(f"抓取中断，详细原因：{str(err)}")
+        except Exception as e:
+            status.error(f"❌ 运行遭遇异常：{str(e)}")
+            # 如果有报错截图，直接在页面上展示出来
+            if st.session_state.last_error_screenshot:
+                st.warning("📸 以下是程序中断时，云端浏览器捕获的实时画面，您可以参考它来排查卡在哪一步：")
+                st.image(st.session_state.last_error_screenshot, caption="出错时的网页截图", use_column_width=True)
