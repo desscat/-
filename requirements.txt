@@ -1,3 +1,4 @@
 streamlit
 playwright
 pandas
+streamlit-local-storage
