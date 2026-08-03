@@ -13,19 +13,19 @@ st.title("⚡ 全阅读学情打卡生成器")
 # 读取 URL 参数中的持久化数据
 query_params = st.query_params
 
-stored_token = query_params.get("token", "")[cite: 1]
-stored_rules = query_params.get("rules", "")[cite: 1]
-stored_maps = query_params.get("maps", "")[cite: 1]
-stored_template = query_params.get("template", "")[cite: 1]
+stored_token = query_params.get("token", "")
+stored_rules = query_params.get("rules", "")
+stored_maps = query_params.get("maps", "")
+stored_template = query_params.get("template", "")
 
-# 解析 JSON 尔规则
+# 解析 JSON 规则
 try:
-    init_rules = json.loads(urllib.parse.unquote(stored_rules)) if stored_rules else {}[cite: 1]
+    init_rules = json.loads(urllib.parse.unquote(stored_rules)) if stored_rules else {}
 except Exception:
     init_rules = {}
 
 try:
-    init_maps = json.loads(urllib.parse.unquote(stored_maps)) if stored_maps else {}[cite: 1]
+    init_maps = json.loads(urllib.parse.unquote(stored_maps)) if stored_maps else {}
 except Exception:
     init_maps = {}
 
