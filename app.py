@@ -1,34 +1,13 @@
 import json
 import re
-import urllib.parse
 from datetime import datetime, date, timedelta
 import requests
 import streamlit as st
-import streamlit.components.v1 as components
 
 # ==================== 1. 页面配置 ====================
 st.set_page_config(page_title="全阅读学情打卡生成器", page_icon="⚡", layout="centered")
 
 st.title("⚡ 全阅读学情打卡生成器")
-
-# 读取 URL 参数中的持久化数据
-query_params = st.query_params
-
-stored_token = query_params.get("token", "")
-stored_rules = query_params.get("rules", "")
-stored_maps = query_params.get("maps", "")
-stored_template = query_params.get("template", "")
-
-# 解析 JSON 规则
-try:
-    init_rules = json.loads(urllib.parse.unquote(stored_rules)) if stored_rules else {}
-except Exception:
-    init_rules = {}
-
-try:
-    init_maps = json.loads(urllib.parse.unquote(stored_maps)) if stored_maps else {}
-except Exception:
-    init_maps = {}
 
 # 默认的 DIY 模板样式
 default_template = """[以下为{date_title}的打卡情况]
@@ -44,30 +23,18 @@ default_template = """[以下为{date_title}的打卡情况]
 ⏰【该起床打卡啦】
 {zeros}"""
 
-init_template = urllib.parse.unquote(stored_template) if stored_template else default_template
-
 # Session 状态安全初始化
 if "class_rules" not in st.session_state:
-    st.session_state.class_rules = init_rules
+    st.session_state.class_rules = {}
 
 if "name_maps" not in st.session_state:
-    st.session_state.name_maps = init_maps
+    st.session_state.name_maps = {}
 
 if "token" not in st.session_state:
-    st.session_state.token = stored_token
+    st.session_state.token = ""
 
 if "custom_template" not in st.session_state:
-    st.session_state.custom_template = init_template
-
-# 同步并更新当前的 URL 参数
-def update_url_params():
-    rules_str = urllib.parse.quote(json.dumps(st.session_state.class_rules, ensure_ascii=False))
-    maps_str = urllib.parse.quote(json.dumps(st.session_state.name_maps, ensure_ascii=False))
-    template_str = urllib.parse.quote(st.session_state.custom_template)
-    st.query_params["token"] = st.session_state.token
-    st.query_params["rules"] = rules_str
-    st.query_params["maps"] = maps_str
-    st.query_params["template"] = template_str
+    st.session_state.custom_template = default_template
 
 # ==================== 2. 工具函数 ====================
 def parse_name_map(map_str):
@@ -198,7 +165,7 @@ def fetch_data_via_api(auth_token, report_type, start_date, end_date, class_rule
             d_start = date.today().replace(day=1)
             d_end = date.today()
             s_date = d_start.strftime("%Y-%m-%d")
-            e_date = d_end.strftime("%Y-%m-%d")
+            e_date = s_date
             date_title = f"{s_date}至{e_date}"
             days_count = (d_end - d_start).days + 1
         elif report_type == "自定义时间":
@@ -261,25 +228,23 @@ def fetch_data_via_api(auth_token, report_type, start_date, end_date, class_rule
 # ==================== 4. 界面展示 ====================
 st.subheader("1. 身份凭证与时间选择")
 
-# 重置按钮：通过 JS 彻底清空 URL 参数并重新加载干净的页面
+# 重置按钮：直接清空缓存并通过 st.rerun() 刷新
 if st.button("🧹 退出当前账号 / 清除缓存重置", type="secondary"):
-    components.html("""
-        <script>
-            window.parent.location.href = window.parent.location.origin + window.parent.location.pathname;
-        </script>
-    """, height=0)
+    st.session_state.token = ""
+    st.session_state.class_rules = {}
+    st.session_state.name_maps = {}
+    st.session_state.custom_template = default_template
+    st.query_params.clear()
+    st.rerun()
 
 login_tab1, login_tab2 = st.tabs(["🔐 账号密码登录", "🔑 Token 凭证"])
 with login_tab1:
     username_input = st.text_input("👤 手机号", placeholder="请输入全阅读手机号")
     password_input = st.text_input("🔒 密码", type="password", placeholder="请输入密码")
 with login_tab2:
-    if "token" not in st.session_state:
-        st.session_state.token = ""
     token_input = st.text_input("🔑 Token 凭证", value=st.session_state.token, type="password")
     if token_input != st.session_state.token:
         st.session_state.token = token_input
-        update_url_params()
 
 report_type = st.radio("选择统计周期：", ["昨日汇报", "周汇报", "月汇报", "自定义时间"], horizontal=True)
 
@@ -319,7 +284,6 @@ with st.expander("✨ 点击展开/收起：自由编辑排版和文案样式", 
     )
     if custom_template_input != st.session_state.custom_template:
         st.session_state.custom_template = custom_template_input
-        update_url_params()
 
 st.subheader("4. ⚙️ 班级规则与英文映射")
 new_class_input = st.text_input("➕ 添加班级全称：", placeholder="例如：康乐E4")
@@ -327,7 +291,6 @@ if st.button("添加班级"):
     if new_class_input and new_class_input not in st.session_state.class_rules:
         st.session_state.class_rules[new_class_input] = {"listen": 60, "anim": 15, "books": 2}
         st.session_state.name_maps[new_class_input] = ""
-        update_url_params()
         st.rerun()
 
 class_rules_config = {}
@@ -342,7 +305,6 @@ for c_name in list(st.session_state.class_rules.keys()):
             del st.session_state.class_rules[c_name]
             if c_name in st.session_state.name_maps:
                 del st.session_state.name_maps[c_name]
-            update_url_params()
             st.rerun()
 
     c1, c2, c3 = st.columns(3)
@@ -357,8 +319,6 @@ for c_name in list(st.session_state.class_rules.keys()):
     class_rules_config[c_name] = {"listen": l_v, "anim": a_v, "books": b_v}
     name_maps_config[c_name] = n_m
 
-update_url_params()
-
 st.divider()
 submit_button = st.button("⚡ 一键生成所有班级打卡报告", type="primary", use_container_width=True)
 
@@ -372,7 +332,6 @@ if submit_button:
             else:
                 current_token = login_token
                 st.session_state.token = login_token
-                update_url_params()
 
     if not current_token:
         st.warning("⚠️ 请输入账号密码或 Token！")
