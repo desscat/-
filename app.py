@@ -3,25 +3,44 @@ import re
 from datetime import datetime, date, timedelta
 import requests
 import streamlit as st
-import streamlit.components.v1 as components
+from streamlit_local_storage import LocalStorage
 
 # ==================== 1. 页面配置 ====================
 st.set_page_config(page_title="全阅读学情打卡生成器", page_icon="⚡", layout="wide")
 
 st.title("⚡ 全阅读学情打卡生成器")
-st.caption("已开启浏览器本地缓存：你的账号与班级配置仅保存于当前手机/电脑，刷新不丢失，多用户互不干扰")
+st.caption("已启用浏览器 LocalStorage：各自手机独立记忆账号与班级配置，刷新不丢失")
 
-# ==================== 2. Session状态初始化 ====================
-if "class_rules" not in st.session_state:
-    st.session_state.class_rules = {}
+# 初始化本地存储对象
+local_storage = LocalStorage()
 
-if "name_maps" not in st.session_state:
-    st.session_state.name_maps = {}
+# 从浏览器本地存储获取持久化数据
+stored_token = local_storage.getItem("read_app_token") or ""
+stored_rules = local_storage.getItem("read_app_rules")
+stored_maps = local_storage.getItem("read_app_maps")
 
-if "token" not in st.session_state:
-    st.session_state.token = ""
+# 解析 JSON 规则
+try:
+    init_rules = json.loads(stored_rules) if stored_rules else {}
+except Exception:
+    init_rules = {}
 
-# 工具函数：解析英文名映射
+try:
+    init_maps = json.loads(stored_maps) if stored_maps else {}
+except Exception:
+    init_maps = {}
+
+# Session 状态同步
+if "class_rules" not in st.session_state or not st.session_state.class_rules:
+    st.session_state.class_rules = init_rules
+
+if "name_maps" not in st.session_state or not st.session_state.name_maps:
+    st.session_state.name_maps = init_maps
+
+if "token" not in st.session_state or not st.session_state.token:
+    st.session_state.token = stored_token
+
+# ==================== 工具函数 ====================
 def parse_name_map(map_str):
     mapping = {}
     if not map_str:
@@ -97,7 +116,7 @@ def generate_markdown(class_name, date_title, student_list, req_listen, req_anim
 {zeros_formatted}
 """
 
-# ==================== 3. API 抓取与登录逻辑 ====================
+# ==================== 3. 自动登录与 API 抓取逻辑 ====================
 def auto_login(username, password):
     login_url = "https://v2.ireadabc.com/api/login"
     payload = {
@@ -205,7 +224,7 @@ def fetch_data_via_api(auth_token, report_type, start_date, end_date, class_rule
     except Exception as e:
         return None, str(e)
 
-# ==================== 4. 前端页面交互 ====================
+# ==================== 4. 前端交互界面 ====================
 col_left, col_right = st.columns([1, 1])
 
 with col_left:
@@ -219,8 +238,9 @@ with col_left:
         
     with login_tab2:
         token_input = st.text_input("🔑 Token 凭证", value=st.session_state.token, type="password", placeholder="粘贴 Token 凭证")
-        if token_input:
+        if token_input != st.session_state.token:
             st.session_state.token = token_input
+            local_storage.setItem("read_app_token", token_input)
 
     st.write("")
     report_type = st.radio("选择统计周期：", ["今日汇报", "周汇报", "月汇报", "自定义"], horizontal=True)
@@ -255,6 +275,11 @@ with col_right:
         if new_class_input and new_class_input not in st.session_state.class_rules:
             st.session_state.class_rules[new_class_input] = {"listen": 60, "anim": 15, "books": 2}
             st.session_state.name_maps[new_class_input] = ""
+            
+            # 写入手机本地缓存
+            local_storage.setItem("read_app_rules", json.dumps(st.session_state.class_rules))
+            local_storage.setItem("read_app_maps", json.dumps(st.session_state.name_maps))
+            
             st.success(f"已成功添加班级：{new_class_input}")
             st.rerun()
 
@@ -262,7 +287,7 @@ with col_right:
     name_maps_config = {}
 
     if not st.session_state.class_rules:
-        st.info("💡 提示：您可以在此配置班级英文名映射。支持下方直接导入/导出文件进行快速迁移。")
+        st.info("💡 提示：在此配置好班级信息后，会自动记在当前手机/电脑上，下次刷新不会丢失。")
     else:
         with st.expander("📋 各班级【英文名映射】与【考核标准】配置列表", expanded=True):
             for c_name in list(st.session_state.class_rules.keys()):
@@ -274,6 +299,10 @@ with col_right:
                         del st.session_state.class_rules[c_name]
                         if c_name in st.session_state.name_maps:
                             del st.session_state.name_maps[c_name]
+                        
+                        # 更新本地缓存
+                        local_storage.setItem("read_app_rules", json.dumps(st.session_state.class_rules))
+                        local_storage.setItem("read_app_maps", json.dumps(st.session_state.name_maps))
                         st.rerun()
 
                 c1, c2, c3 = st.columns(3)
@@ -295,7 +324,11 @@ with col_right:
                 name_maps_config[c_name] = n_m
                 st.divider()
 
-    st.markdown("##### 📁 配置导出与恢复 (跨设备共享配置)")
+            # 保存更改到手机浏览器本地
+            local_storage.setItem("read_app_rules", json.dumps(st.session_state.class_rules))
+            local_storage.setItem("read_app_maps", json.dumps(st.session_state.name_maps))
+
+    st.markdown("##### 📁 配置导出与恢复 (跨设备共享)")
     export_data = json.dumps({"rules": st.session_state.class_rules, "maps": st.session_state.name_maps}, ensure_ascii=False, indent=2)
     
     col_exp, col_imp = st.columns(2)
@@ -308,6 +341,10 @@ with col_right:
             config_data = json.load(uploaded_file)
             st.session_state.class_rules = config_data.get("rules", {})
             st.session_state.name_maps = config_data.get("maps", {})
+            
+            local_storage.setItem("read_app_rules", json.dumps(st.session_state.class_rules))
+            local_storage.setItem("read_app_maps", json.dumps(st.session_state.name_maps))
+            
             st.success("✅ 配置加载成功！")
             st.rerun()
         except Exception:
@@ -325,7 +362,8 @@ if submit_button:
             else:
                 current_token = login_token
                 st.session_state.token = login_token
-                st.success("✅ 登录成功！")
+                local_storage.setItem("read_app_token", login_token)
+                st.success("✅ 登录成功，Token 已记住在本地！")
 
     if not current_token:
         st.warning("⚠️ 请输入有效的账号密码或粘贴 Token 凭证！")
