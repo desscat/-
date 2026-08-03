@@ -165,7 +165,7 @@ def fetch_data_via_api(auth_token, report_type, start_date, end_date, class_rule
             d_start = date.today().replace(day=1)
             d_end = date.today()
             s_date = d_start.strftime("%Y-%m-%d")
-            e_date = s_date
+            e_date = d_end.strftime("%Y-%m-%d")
             date_title = f"{s_date}至{e_date}"
             days_count = (d_end - d_start).days + 1
         elif report_type == "自定义时间":
@@ -228,7 +228,7 @@ def fetch_data_via_api(auth_token, report_type, start_date, end_date, class_rule
 # ==================== 4. 界面展示 ====================
 st.subheader("1. 身份凭证与时间选择")
 
-# 重置按钮：直接清空缓存并通过 st.rerun() 刷新
+# 重置按钮
 if st.button("🧹 退出当前账号 / 清除缓存重置", type="secondary"):
     st.session_state.token = ""
     st.session_state.class_rules = {}
@@ -324,17 +324,20 @@ submit_button = st.button("⚡ 一键生成所有班级打卡报告", type="prim
 
 if submit_button:
     current_token = st.session_state.token
+    
+    # 如果用户在第一个 Tab 输入了账号密码，优先用账号密码去请求登录换取 Token
     if username_input and password_input:
-        with st.spinner("🔑 登录中..."):
+        with st.spinner("🔑 正在通过账号密码登录获取 Token..."):
             login_token, login_err = auto_login(username_input, password_input)
             if login_err:
                 st.error(f"❌ 登录失败：{login_err}")
+                st.stop()
             else:
                 current_token = login_token
-                st.session_state.token = login_token
+                st.session_state.token = login_token  # 关键修复：强制更新到全局会话状态中
 
     if not current_token:
-        st.warning("⚠️ 请输入账号密码或 Token！")
+        st.warning("⚠️ 请输入账号密码，或者在第二个标签页输入 Token 凭证！")
     else:
         with st.spinner("⚡ 正在获取全阅读打卡数据..."):
             reports, err = fetch_data_via_api(
