@@ -9,8 +9,8 @@ from app import run_automation_web, generate_markdown
 # ==================== 1. 配置参数 ====================
 # 将这里的配置替换为你自己的真实信息
 PUSHPLUS_TOKEN = "8e6def430cef47be99f2a6fe4b5aa2f7"  # 填入第一步获取的 Token
-IREAD_USER = "你的全阅读账号"
-IREAD_PWD = "你的全阅读密码"
+IREAD_USER = "15859214214"
+IREAD_PWD = "4214"
 
 # 班级考核标准配置（根据你的实际班级修改）
 CLASS_RULES_CONFIG = {
@@ -97,7 +97,7 @@ if __name__ == "__main__":
     scheduler = BlockingScheduler()
     
     # ⏱️ 设置每天晚上 21:00 自动运行（可自行调整 hour 和 minute）
-    scheduler.add_job(execute_daily_report, 'cron', hour=14, minute=7)
+    scheduler.add_job(execute_daily_report, 'cron', hour=14, minute=30)
     
     print("🚀 定时任务服务已启动！")
     print("📅 任务设定：每天 21:00 自动抓取并推送至微信。")
