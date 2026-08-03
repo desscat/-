@@ -119,9 +119,13 @@ def auto_login(username, password):
         resp = requests.post(login_url, json=payload, headers=headers, timeout=20)
         if resp.status_code == 200:
             res = resp.json()
-            data = res.get("data", {}) if isinstance(res.get("data"), dict) else {}
-            token = data.get("token") or data.get("access_token") or res.get("token") or res.get("access_token")
-            return (token, None) if token else (None, res.get("msg") or "账号密码不匹配")
+            # 严格对应你截图中 data 里面的 token
+            data = res.get("data")
+            if isinstance(data, dict):
+                token = data.get("token")
+                if token:
+                    return token, None
+            return None, res.get("message") or "登录成功但未解析到 Token"
         return None, f"服务器返回异常({resp.status_code})"
     except Exception as e:
         return None, f"网络错误：{str(e)}"
@@ -129,7 +133,7 @@ def auto_login(username, password):
 def fetch_data_via_api(auth_token, report_type, start_date, end_date, class_rules_config, name_maps_config, default_rule, template_str):
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-        "Token": auth_token,
+        "Token": auth_token.strip(),
         "Client-Type": "BROWSER"
     }
     reports_dict = {}
@@ -137,15 +141,15 @@ def fetch_data_via_api(auth_token, report_type, start_date, end_date, class_rule
     try:
         classes_url = "https://v2.ireadabc.com/api/v3/reports/classes/all" 
         resp = requests.get(classes_url, headers=headers, timeout=20)
-        classes_data = resp.json().get("data", []) if resp.status_code == 200 else []
+        
+        if resp.status_code != 200:
+            return None, f"Token 验证失效或服务器返回异常 ({resp.status_code})，请检查账号密码或 Token 是否正确。"
+            
+        res_json = resp.json()
+        classes_data = res_json.get("data", [])
 
         if not classes_data:
-            classes_data = [
-                {"id": "17985", "name": "康乐E4"},
-                {"id": "17988", "name": "康乐K11"},
-                {"id": "27935", "name": "康乐K24"},
-                {"id": "49420", "name": "康乐K31"}
-            ]
+            return None, "当前账号获取到的班级列表为空，可能是账号错误或该账号下无管理班级。"
 
         days_count = 1
         if report_type == "昨日汇报":
@@ -229,16 +233,16 @@ def fetch_data_via_api(auth_token, report_type, start_date, end_date, class_rule
 st.subheader("1. 身份凭证与时间选择")
 
 # 重置按钮
-if st.button("🧹 退出当前账号 / 清除缓存重置", type="secondary"):
+if st.button("🧹 清空当前凭证缓存", type="secondary"):
     st.session_state.token = ""
     st.session_state.class_rules = {}
     st.session_state.name_maps = {}
     st.session_state.custom_template = default_template
     st.rerun()
 
-login_tab1, login_tab2 = st.tabs(["🔐 账号密码登录", "🔑 Token 凭证"])
+login_tab1, login_tab2 = st.tabs(["🔐 账号密码登录 (推荐)", "🔑 Token 凭证"])
 with login_tab1:
-    username_input = st.text_input("👤 手机号", placeholder="请输入要登录的手机号")
+    username_input = st.text_input("👤 手机号", placeholder="请输入要切换账号的手机号")
     password_input = st.text_input("🔒 密码", type="password", placeholder="请输入对应的密码")
 with login_tab2:
     token_input = st.text_input("🔑 Token 凭证", value=st.session_state.token, type="password")
@@ -316,22 +320,21 @@ submit_button = st.button("⚡ 一键生成所有班级打卡报告", type="prim
 if submit_button:
     final_token = ""
     
-    # 【核心修改逻辑】：如果用户在 Tab 1 填写了手机号和密码，绝对优先走网络登录换取新 Token
+    # 如果在 Tab 1 填了手机号和密码，直接通过登录接口换取新 Token
     if username_input and password_input:
-        with st.spinner("🔑 正在通过朋友的账号密码登录获取新凭证..."):
+        with st.spinner("🔑 正在通过账号密码自动登录获取新凭证..."):
             login_token, login_err = auto_login(username_input, password_input)
             if login_err:
                 st.error(f"❌ 登录失败：{login_err}")
                 st.stop()
             else:
                 final_token = login_token
-                st.session_state.token = login_token  # 彻底覆盖全局
     else:
-        # 否则才使用 Tab 2 中填写的 Token
+        # 否则使用 Tab 2 的 Token
         final_token = st.session_state.token
 
     if not final_token:
-        st.warning("⚠️ 请在上方输入“账号密码”或者切换到“Token 凭证”标签页输入 Token！")
+        st.warning("⚠️ 请在上方“账号密码登录”标签页输入手机号和密码，或在“Token 凭证”标签页输入 Token！")
     else:
         with st.spinner("⚡ 正在获取对应账号的全阅读打卡数据..."):
             reports, err = fetch_data_via_api(
@@ -342,7 +345,7 @@ if submit_button:
             if err:
                 st.error(f"❌ 错误：{err}")
             elif reports:
-                st.success("🎉 切换账号生成成功！")
+                st.success("🎉 数据获取成功！")
                 for c_name, c_content in reports.items():
                     st.markdown(f"### 📍 {c_name} 打卡报告")
                     st.code(c_content, language=None)
