@@ -136,7 +136,6 @@ def fetch_data_via_api(auth_token, report_type, start_date, end_date, class_rule
     reports_dict = {}
 
     try:
-        # 使用抓包确认的正确接口
         classes_url = "https://v2.ireadabc.com/api/teacher/classes/page/all" 
         resp = requests.get(classes_url, headers=headers, timeout=20)
         
@@ -144,12 +143,17 @@ def fetch_data_via_api(auth_token, report_type, start_date, end_date, class_rule
             return None, f"Token 验证失效或服务器返回异常 ({resp.status_code})，请检查账号密码或 Token 是否正确。"
             
         res_json = resp.json()
-        classes_data = res_json.get("data", [])
-        if isinstance(classes_data, dict):
-            classes_data = classes_data.get("list", []) or classes_data.get("classes", [])
+        raw_data = res_json.get("data", [])
+        
+        # 兼容各种分页及嵌套格式（list, records, 或者直接是数组）
+        classes_data = []
+        if isinstance(raw_data, list):
+            classes_data = raw_data
+        elif isinstance(raw_data, dict):
+            classes_data = raw_data.get("list", []) or raw_data.get("records", []) or raw_data.get("classes", [])
 
         if not classes_data:
-            return None, "当前账号获取到的班级列表为空，可能是账号下无管理班级。"
+            return None, f"获取到的班级列表为空。原始响应: {str(res_json)[:150]}"
 
         days_count = 1
         if report_type == "昨日汇报":
@@ -198,7 +202,7 @@ def fetch_data_via_api(auth_token, report_type, start_date, end_date, class_rule
                 s_json = stat_resp.json()
                 students_raw = s_json.get("data", []) if isinstance(s_json, dict) else s_json
                 if isinstance(students_raw, dict):
-                    students_raw = students_raw.get("list", []) or students_raw.get("students", [])
+                    students_raw = students_raw.get("list", []) or students_raw.get("students", []) or students_raw.get("records", [])
 
                 students_data = []
                 for s in students_raw:
@@ -280,7 +284,7 @@ with st.expander("✨ 点击展开/收起：自由编辑排版和文案样式", 
         st.session_state.custom_template = custom_template_input
 
 st.subheader("4. ⚙️ 班级规则与英文映射")
-new_class_input = st.text_input("➕ 添加班级全称：", placeholder="例如：康乐E4")
+new_class_input = st.text_input("➕ 添加班级全称：", placeholder="例如：万达K12班")
 if st.button("添加班级"):
     if new_class_input and new_class_input not in st.session_state.class_rules:
         st.session_state.class_rules[new_class_input] = {"listen": 60, "anim": 15, "books": 2}
