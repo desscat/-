@@ -449,5 +449,15 @@ if submit_button:
                     )
                 else:
                     status.error("⚠️ 未能获取到任何有效数据，请确认输入的账号密码是否正确。")
-        except Exception as e:
-            status.error(f"❌ 运行遭遇异常：{str(e)}")
+       except Exception as err:
+            screenshot_bytes = None
+            try:
+                # 让 Playwright 直接把截图保存为二进制数据，而不是存文件
+                screenshot_bytes = page.screenshot(type="png")
+            except:
+                pass
+            browser.close()
+            
+            # 把截图存进 session_state，等下在前端显示出来
+            st.session_state.last_error_screenshot = screenshot_bytes
+            raise Exception(f"抓取中断，详细原因：{str(err)}")
