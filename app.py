@@ -101,28 +101,25 @@ def auto_login(username, password):
     """自动使用账号密码向真实接口获取 Token"""
     login_url = "https://v2.ireadabc.com/api/login"
     payload = {
-        "username": username,
-        "password": password,
-        "mobile": username,
-        "account": username
+        "account": username,
+        "password": password
     }
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-        "Content-Type": "application/json",
+        "Content-Type": "application/json;charset=UTF-8",
         "Accept": "application/json, text/plain, */*"
     }
     try:
         resp = requests.post(login_url, json=payload, headers=headers, timeout=10)
         if resp.status_code == 200:
             res = resp.json()
-            # 兼容多种数据返回格式，精准提取 token
             data = res.get("data", {}) if isinstance(res.get("data"), dict) else {}
             token = data.get("token") or data.get("access_token") or res.get("token") or res.get("access_token")
             
             if token:
                 return token, None
             else:
-                msg = res.get("msg") or res.get("message") or "登录未返回凭证，请检查账号或密码是否正确"
+                msg = res.get("msg") or res.get("message") or res.get("error") or "账号或密码有误，未提取到登录凭证"
                 return None, msg
         else:
             return None, f"登录失败，服务器返回状态码：{resp.status_code}"
@@ -149,7 +146,7 @@ def fetch_data_via_api(auth_token, report_type, start_date, end_date, class_rule
             res_json = resp.json()
             classes_data = res_json.get("data", []) if isinstance(res_json, dict) else res_json
 
-        # 2. 静态精准兜底配置（结合已有班级 ID 与名称）
+        # 2. 静态精准兜底配置
         if not classes_data or not isinstance(classes_data, list):
             classes_data = [
                 {"id": "17985", "name": "康乐E4"},
