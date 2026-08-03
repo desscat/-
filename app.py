@@ -5,10 +5,10 @@ import requests
 import streamlit as st
 
 # ==================== 1. 页面配置 ====================
-st.set_page_config(page_title="全阅读学情打卡生成器 (API极速版)", page_icon="⚡", layout="wide")
+st.set_page_config(page_title="全阅读学情打卡生成器 (自动登录版)", page_icon="⚡", layout="wide")
 
-st.title("⚡ 全阅读学情打卡生成器 (全班级自动版)")
-st.caption("采用后端 API 直接通信，毫秒级响应，告别浏览器卡顿与超时问题")
+st.title("⚡ 全阅读学情打卡生成器")
+st.caption("输入账号密码即可一键登录并生成所有班级的打卡报告")
 
 # ==================== 2. Session状态初始化 ====================
 if "class_rules" not in st.session_state:
@@ -96,7 +96,36 @@ def generate_markdown(class_name, date_title, student_list, req_listen, req_anim
 {zeros_formatted}
 """
 
-# ==================== 3. 核心 API 抓取逻辑 ====================
+# ==================== 3. 自动登录与 API 抓取逻辑 ====================
+def auto_login(username, password):
+    """自动使用账号密码向服务器获取 Token"""
+    login_url = "https://v2.ireadabc.com/api/v3/auth/login"
+    payload = {
+        "username": username,
+        "password": password,
+        "mobile": username
+    }
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Content-Type": "application/json",
+        "Accept": "application/json, text/plain, */*"
+    }
+    try:
+        resp = requests.post(login_url, json=payload, headers=headers, timeout=10)
+        if resp.status_code == 200:
+            res = resp.json()
+            data = res.get("data", {})
+            # 兼容提取 Token
+            token = data.get("token") or data.get("access_token") or res.get("token")
+            if token:
+                return token, None
+            else:
+                return None, res.get("msg") or "登录失败，未能成功提取凭证"
+        else:
+            return None, f"登录失败，状态码：{resp.status_code}，请检查账号密码"
+    except Exception as e:
+        return None, f"网络连接异常：{str(e)}"
+
 def fetch_data_via_api(auth_token, report_type, start_date, end_date, class_rules_config, name_maps_config, default_rule):
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
@@ -108,7 +137,7 @@ def fetch_data_via_api(auth_token, report_type, start_date, end_date, class_rule
     reports_dict = {}
 
     try:
-        # 1. 先通过 API 获取班级列表 ('all' 接口)
+        # 1. 尝试获取班级列表
         classes_url = "https://v2.ireadabc.com/api/v3/reports/classes/all" 
         resp = requests.get(classes_url, headers=headers, timeout=10)
         
@@ -117,7 +146,7 @@ def fetch_data_via_api(auth_token, report_type, start_date, end_date, class_rule
             res_json = resp.json()
             classes_data = res_json.get("data", []) if isinstance(res_json, dict) else res_json
 
-        # 2. 静态精准兜底配置（基于截图呈现的所有班级）
+        # 2. 静态精准兜底配置
         if not classes_data or not isinstance(classes_data, list):
             classes_data = [
                 {"id": "17985", "name": "康乐E4"},
@@ -192,11 +221,21 @@ def fetch_data_via_api(auth_token, report_type, start_date, end_date, class_rule
 col_left, col_right = st.columns([1, 1])
 
 with col_left:
-    st.subheader("1. 凭证与时间选择")
+    st.subheader("1. 登录与时间选择")
     
-    token_input = st.text_input("🔑 Token 凭证", value=st.session_state.token, type="password", placeholder="粘贴 F12 中的 Token 字符串")
-    st.session_state.token = token_input
+    # 登录方式切换标签页
+    login_tab1, login_tab2 = st.tabs(["🔐 账号密码登录", "🔑 Token 凭证登录"])
     
+    with login_tab1:
+        username_input = st.text_input("👤 手机号 / 账号", placeholder="请输入全阅读登录账号")
+        password_input = st.text_input("🔒 密码", type="password", placeholder="请输入密码")
+        
+    with login_tab2:
+        token_input = st.text_input("🔑 Token 凭证", value=st.session_state.token, type="password", placeholder="可粘贴 F12 中的 Token")
+        if token_input:
+            st.session_state.token = token_input
+
+    st.write("")
     report_type = st.radio("选择统计周期：", ["今日汇报", "周汇报", "月汇报", "自定义"], horizontal=True)
 
     start_date, end_date = date.today(), date.today()
@@ -219,7 +258,7 @@ with col_left:
     default_rule = {"listen": def_listen, "anim": def_anim, "books": def_books}
 
     st.write("")
-    submit_button = st.button("⚡ 毫秒级生成全班级报告", type="primary", use_container_width=True)
+    submit_button = st.button("⚡ 一键登录并生成所有班级报告", type="primary", use_container_width=True)
 
 with col_right:
     st.subheader("3. ⚙️ 班级配置与共享管理")
@@ -236,7 +275,7 @@ with col_right:
     name_maps_config = {}
 
     if not st.session_state.class_rules:
-        st.info("💡 提示：您可以添加康乐E4、康乐K11、康乐K24、康乐K31等各个班级的英文名映射。未单独配置的班级将自动使用【通用兜底标准】。")
+        st.info("💡 提示：您可以在此配置班级学生英文名映射，配置后系统将自动替学生替换英文名。")
     else:
         with st.expander("📋 各班级【英文名映射】与【考核标准】配置列表", expanded=True):
             for c_name in list(st.session_state.class_rules.keys()):
@@ -289,12 +328,25 @@ with col_right:
 
 # ==================== 5. 执行逻辑 ====================
 if submit_button:
-    if not token_input:
-        st.warning("⚠️ 请先输入 Token 凭证！")
+    current_token = st.session_state.token
+    
+    # 如果用户输入了账号密码，先执行自动登录
+    if username_input and password_input:
+        with st.spinner("🔑 正在自动登录全阅读账号..."):
+            login_token, login_err = auto_login(username_input, password_input)
+            if login_err:
+                st.error(f"❌ {login_err}")
+            else:
+                current_token = login_token
+                st.session_state.token = login_token
+                st.success("✅ 登录成功！正在抓取班级数据...")
+
+    if not current_token:
+        st.warning("⚠️ 请先输入账号密码或粘贴 Token！")
     else:
         with st.spinner("⚡ 正在获取所有班级数据..."):
             reports, err = fetch_data_via_api(
-                token_input, report_type, start_date, end_date, 
+                current_token, report_type, start_date, end_date, 
                 class_rules_config, name_maps_config, default_rule
             )
             
