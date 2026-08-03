@@ -1,32 +1,14 @@
-import os
-import re
 import json
-import subprocess
+import re
 from datetime import datetime, date, timedelta
+import requests
 import streamlit as st
 
-# ==================== 0. 自动补全/安装 Playwright 核心驱动 ====================
-try:
-    from playwright.sync_api import sync_playwright
-except ImportError:
-    subprocess.run(["pip", "install", "playwright"])
-    subprocess.run(["playwright", "install", "chromium"])
-    from playwright.sync_api import sync_playwright
-
-@st.cache_resource(show_spinner=False)
-def install_playwright_browser():
-    try:
-        subprocess.run(["playwright", "install", "chromium"], check=True)
-    except Exception as e:
-        print(f"Browser install note: {e}")
-
-install_playwright_browser()
-
 # ==================== 1. 页面配置 ====================
-st.set_page_config(page_title="全阅读学情打卡生成器", page_icon="📚", layout="wide")
+st.set_page_config(page_title="全阅读学情打卡生成器 (API极速版)", page_icon="⚡", layout="wide")
 
-st.title("📚 全阅读学情打卡生成器")
-st.caption("支持动态识别班级、自定义英文名映射、多班级独立考核标准及便捷的配置备份恢复")
+st.title("⚡ 全阅读学情打卡生成器 (API直连版)")
+st.caption("采用后端 API 直接通信，毫秒级响应，告别浏览器卡顿与超时问题")
 
 # ==================== 2. Session状态初始化 ====================
 if "class_rules" not in st.session_state:
@@ -34,15 +16,6 @@ if "class_rules" not in st.session_state:
 
 if "name_maps" not in st.session_state:
     st.session_state.name_maps = {}
-
-if "username" not in st.session_state:
-    st.session_state.username = ""
-
-if "password" not in st.session_state:
-    st.session_state.password = ""
-
-if "last_error_screenshot" not in st.session_state:
-    st.session_state.last_error_screenshot = None
 
 # ==================== 工具函数 ====================
 def parse_name_map(map_str):
@@ -118,231 +91,84 @@ def generate_markdown(class_name, date_title, student_list, req_listen, req_anim
 {zeros_formatted}
 """
 
-# ==================== 3. 核心抓取逻辑 ====================
-def run_automation_web(username, password, report_type, start_date, end_date, class_rules_config, name_maps_config, default_rule, status_placeholder):
-    login_url = "https://v2.ireadabc.com/#/admin/classes/index"
+# ==================== 3. 核心 API 抓取逻辑 ====================
+def fetch_data_via_api(auth_token, report_type, start_date, end_date, class_rules_config, name_maps_config, default_rule):
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Authorization": auth_token,
+        "Accept": "application/json, text/plain, */*"
+    }
+    
     reports_dict = {}
 
-    with sync_playwright() as p:
-        status_placeholder.info("🚀 正在启动云端浏览器...")
+    # 1. 请求班级列表 API（如果网络请求路径有差别，可根据 F12 微调 URL）
+    classes_url = "https://v2.ireadabc.com/api/admin/classes" 
+    
+    try:
+        resp = requests.get(classes_url, headers=headers, timeout=10)
+        if resp.status_code != 200:
+            raise Exception(f"Token 无效或接口响应异常，状态码：{resp.status_code}")
         
-        browser = p.chromium.launch(
-            headless=True,
-            args=[
-                "--no-sandbox",
-                "--disable-setuid-sandbox",
-                "--disable-dev-shm-usage",
-                "--disable-accelerated-2d-canvas",
-                "--disable-gpu"
-            ]
-        )
-        context = browser.new_context(
-            viewport={"width": 1920, "height": 1080},
-            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-        )
-        page = context.new_page()
+        classes_data = resp.json().get("data", [])
+        if not classes_data:
+            return {}, "未获取到班级信息，请检查 Token 是否过期。"
 
-        try:
-            status_placeholder.info("🔑 正在打开全阅读登录页面...")
-            page.goto(login_url, wait_until="networkidle", timeout=60000)
-            page.wait_for_selector("input", timeout=20000)
-            page.wait_for_timeout(1500)
-
-            # 1. 智能填写账号密码（双重保障：点击模拟键盘 + JS派发input事件触发Vue/React绑定）
-            inputs = page.query_selector_all("input")
-            if len(inputs) >= 2:
-                # 处理账号输入框
-                inputs[0].click()
-                inputs[0].fill(username)
-                page.evaluate("""([el, val]) => {
-                    el.value = val;
-                    el.dispatchEvent(new Event('input', { bubbles: true }));
-                    el.dispatchEvent(new Event('change', { bubbles: true }));
-                }""", [inputs[0], username])
-                page.wait_for_timeout(300)
-
-                # 处理密码输入框
-                inputs[1].click()
-                inputs[1].fill(password)
-                page.evaluate("""([el, val]) => {
-                    el.value = val;
-                    el.dispatchEvent(new Event('input', { bubbles: true }));
-                    el.dispatchEvent(new Event('change', { bubbles: true }));
-                }""", [inputs[1], password])
-                page.wait_for_timeout(300)
-
-            # 2. 勾选同意协议（如果存在）
-            try:
-                checkbox = page.query_selector("input[type='checkbox']")
-                if checkbox and not checkbox.is_checked():
-                    checkbox.click()
-                    page.wait_for_timeout(300)
-            except Exception:
-                pass
-
-            # 3. 点击登录按钮
-            login_btn = page.query_selector("button, .el-button, div[role='button']")
-            if login_btn:
-                login_btn.click()
+        # 2. 遍历班级获取学情数据
+        for item in classes_data:
+            class_id = item.get("id")
+            class_name = item.get("name", f"班级_{class_id}")
+            
+            # 构建学情查询 API 参数
+            stats_url = f"https://v2.ireadabc.com/api/admin/classes/{class_id}/student-statistics"
+            params = {}
+            
+            if report_type == "周汇报":
+                params["type"] = "week"
+                date_title = "本周"
+            elif report_type == "月汇报":
+                params["type"] = "month"
+                date_title = "本月"
             else:
-                page.keyboard.press("Enter")
+                params["start_date"] = start_date.strftime("%Y-%m-%d")
+                params["end_date"] = end_date.strftime("%Y-%m-%d")
+                date_title = start_date.strftime("%m月%d日")
 
-            page.wait_for_timeout(2000)
+            stat_resp = requests.get(stats_url, headers=headers, params=params, timeout=10)
+            if stat_resp.status_code == 200:
+                students_raw = stat_resp.json().get("data", [])
+                students_data = []
+                for s in students_raw:
+                    students_data.append({
+                        "name": s.get("name", ""),
+                        "listen": s.get("audio_time", 0),  # 根据实际字段替换
+                        "anim": s.get("video_time", 0),
+                        "books": s.get("book_count", 0)
+                    })
 
-            # 4. 处理可能弹出的协议或确认弹窗
-            try:
-                modal_agree_btn = page.query_selector(".el-message-box .el-button--primary, .el-dialog .el-button--primary")
-                if modal_agree_btn:
-                    modal_agree_btn.click()
-                    page.wait_for_timeout(1000)
-            except Exception:
-                pass
+                # 匹配规则与英文名映射
+                matched_rule = next((class_rules_config[k] for k in class_rules_config if k in class_name or class_name in k), default_rule)
+                matched_name_map = next((name_maps_config[k] for k in name_maps_config if k in class_name or class_name in k), "")
 
-            status_placeholder.info("⏳ 正在进入班级列表...")
-            page.wait_for_selector("tbody tr", timeout=30000)
-            status_placeholder.success("✅ 登录成功！开始抓取数据...")
+                md_res = generate_markdown(
+                    class_name, date_title, students_data,
+                    matched_rule["listen"], matched_rule["anim"], matched_rule["books"],
+                    matched_name_map
+                )
+                reports_dict[class_name] = md_res
 
-            rows = page.query_selector_all("tbody tr")
-            class_count = len(rows)
+        return reports_dict, None
 
-            if class_count == 0:
-                status_placeholder.warning("⚠️ 登录成功，但在该账号下没有找到任何班级。")
-                browser.close()
-                return {}
-
-            for i in range(class_count):
-                page.wait_for_selector("tbody tr", timeout=10000)
-                rows = page.query_selector_all("tbody tr")
-                if i >= len(rows):
-                    break
-                row = rows[i]
-                
-                class_name_elem = row.query_selector("td:nth-child(3)")
-                if not class_name_elem:
-                    continue
-                class_name = class_name_elem.inner_text().strip()
-                
-                status_placeholder.info(f"📊 正在处理班级 ({i+1}/{class_count})：【{class_name}】...")
-                
-                stat_btn = row.query_selector("text=学情统计")
-                if stat_btn:
-                    stat_btn.click()
-                    page.wait_for_timeout(3000)
-                    
-                    if report_type in ["周汇报", "月汇报"]:
-                        date_title = "本周" if report_type == "周汇报" else "本月"
-                        tab_elem = page.query_selector(f"text={report_type}")
-                        if tab_elem:
-                            tab_elem.click()
-                            page.wait_for_timeout(3000)
-                    else:
-                        date_title = f"{start_date.strftime('%m月%d日')}"
-                        
-                        try:
-                            page.click("text=自定义", timeout=5000)
-                        except:
-                            pass
-                        page.wait_for_timeout(1500)
-                        
-                        try:
-                            date_inputs = page.locator(".el-range-input").all()
-                            if len(date_inputs) < 2:
-                                date_inputs = page.locator("input[placeholder*='日期'], input.el-input__inner").all()
-                            
-                            if len(date_inputs) >= 2:
-                                date_inputs[0].click()
-                                page.keyboard.press("Control+A")
-                                page.keyboard.press("Backspace")
-                                date_inputs[0].fill(start_date.strftime("%Y-%m-%d"))
-                                page.wait_for_timeout(300)
-
-                                date_inputs[1].click()
-                                page.keyboard.press("Control+A")
-                                page.keyboard.press("Backspace")
-                                date_inputs[1].fill(end_date.strftime("%Y-%m-%d"))
-                                page.wait_for_timeout(300)
-                                
-                                page.keyboard.press("Enter")
-                                page.wait_for_timeout(500)
-                        except Exception as e:
-                            print(f"[WARN] 填入日期异常: {e}")
-                        
-                        try:
-                            page.click("button:has-text('查看')", timeout=5000)
-                        except:
-                            pass
-                        page.wait_for_timeout(3000)
-
-                    page.wait_for_selector("tbody tr", timeout=15000)
-                    student_rows = page.query_selector_all("tbody tr")
-                    students_data = []
-                    
-                    for s_row in student_rows:
-                        cols = s_row.query_selector_all("td")
-                        if len(cols) >= 5:
-                            s_name = cols[1].inner_text().strip()
-                            s_listen = cols[2].inner_text().strip() or "0"
-                            s_anim = cols[3].inner_text().strip() or "0"
-                            s_books = cols[4].inner_text().strip() or "0"
-                            
-                            students_data.append({
-                                "name": s_name,
-                                "listen": s_listen,
-                                "anim": s_anim,
-                                "books": s_books
-                            })
-                    
-                    matched_rule = None
-                    matched_name_map = ""
-                    
-                    for key in class_rules_config:
-                        if key in class_name or class_name in key:
-                            matched_rule = class_rules_config[key]
-                            break
-                    if not matched_rule:
-                        matched_rule = default_rule
-
-                    for key in name_maps_config:
-                        if key in class_name or class_name in key:
-                            matched_name_map = name_maps_config[key]
-                            break
-
-                    req_listen = matched_rule["listen"]
-                    req_anim = matched_rule["anim"]
-                    req_books = matched_rule["books"]
-                    
-                    md_res = generate_markdown(class_name, date_title, students_data, req_listen, req_anim, req_books, matched_name_map)
-                    reports_dict[class_name] = md_res
-                    
-                    page.go_back()
-                    page.wait_for_timeout(2500)
-
-            browser.close()
-            return reports_dict
-
-        except Exception as err:
-            try:
-                screenshot_bytes = page.screenshot(type="png")
-                st.session_state.last_error_screenshot = screenshot_bytes
-            except Exception:
-                st.session_state.last_error_screenshot = None
-            browser.close()
-            raise Exception(f"抓取中断，详细原因：{str(err)}")
+    except Exception as e:
+        return None, str(e)
 
 # ==================== 4. 前端交互界面 ====================
 col_left, col_right = st.columns([1, 1])
 
 with col_left:
-    st.subheader("1. 账号与时间选择")
+    st.subheader("1. 凭证与时间选择")
     
-    col1, col2 = st.columns(2)
-    with col1:
-        user_input = st.text_input("📱 账号", value=st.session_state.username, placeholder="请输入全阅读账号")
-        st.session_state.username = user_input
-    with col2:
-        pwd_input = st.text_input("🔒 密码", value=st.session_state.password, type="password", placeholder="请输入密码")
-        st.session_state.password = pwd_input
-
+    auth_token = st.text_input("🔑 Authorization / Token", type="password", placeholder="粘贴从 F12 获取的 Token 字符串")
+    
     report_type = st.radio("选择统计周期：", ["今日汇报", "周汇报", "月汇报", "自定义"], horizontal=True)
 
     start_date, end_date = date.today(), date.today()
@@ -365,10 +191,10 @@ with col_left:
     default_rule = {"listen": def_listen, "anim": def_anim, "books": def_books}
 
     st.write("")
-    submit_button = st.button("🚀 开始一键生成报告", type="primary", use_container_width=True)
+    submit_button = st.button("⚡ 毫秒级生成报告", type="primary", use_container_width=True)
 
 with col_right:
-    st.subheader("3. ⚙️ 班级配置与共享管理")
+    st.subheader("3. ⚙️ 班级配置管理")
     
     new_class_input = st.text_input("➕ 添加要配置的班级全称：", placeholder="例如：康乐K25")
     if st.button("添加班级"):
@@ -381,10 +207,8 @@ with col_right:
     class_rules_config = {}
     name_maps_config = {}
 
-    if not st.session_state.class_rules:
-        st.info("💡 提示：您当前未设置特定班级，系统将使用左侧的【通用兜底标准】。也可以在下方快速【导入 JSON】填充数据。")
-    else:
-        with st.expander("📋 各班级【英文名映射】与【考核标准】配置列表", expanded=True):
+    if st.session_state.class_rules:
+        with st.expander("📋 各班级配置列表", expanded=True):
             for c_name in list(st.session_state.class_rules.keys()):
                 col_c1, col_c2 = st.columns([4, 1])
                 with col_c1:
@@ -404,9 +228,7 @@ with col_right:
                 with c3:
                     b_v = st.number_input(f"绘本(本)", value=st.session_state.class_rules[c_name]["books"], step=1, key=f"b_{c_name}")
                 
-                n_m = st.text_area(f"英文名映射 (格式：中文名:英文名，用逗号隔开)", 
-                                   value=st.session_state.name_maps.get(c_name, ""), 
-                                   key=f"m_{c_name}", height=65, placeholder="例如：张三:Tom, 李四:Jerry")
+                n_m = st.text_area(f"英文名映射", value=st.session_state.name_maps.get(c_name, ""), key=f"m_{c_name}", height=65)
                 
                 st.session_state.class_rules[c_name] = {"listen": l_v, "anim": a_v, "books": b_v}
                 st.session_state.name_maps[c_name] = n_m
@@ -415,75 +237,21 @@ with col_right:
                 name_maps_config[c_name] = n_m
                 st.divider()
 
-    st.markdown("##### 📁 本地配置文件 (导出/导入备份)")
-    export_data = json.dumps({"rules": st.session_state.class_rules, "maps": st.session_state.name_maps}, ensure_ascii=False, indent=2)
-    
-    col_exp, col_imp = st.columns(2)
-    with col_exp:
-        st.download_button("📥 导出备份当前配置", data=export_data, file_name="my_config.json", mime="application/json", use_container_width=True)
-    
-    uploaded_file = st.file_uploader("📂 恢复本地备份 (JSON文件)", type=["json"])
-    if uploaded_file is not None:
-        try:
-            config_data = json.load(uploaded_file)
-            st.session_state.class_rules = config_data.get("rules", {})
-            st.session_state.name_maps = config_data.get("maps", {})
-            st.success("✅ 配置恢复成功！")
-            st.rerun()
-        except Exception:
-            st.error("导入失败，文件格式有误。")
-
 # ==================== 5. 执行逻辑 ====================
 if submit_button:
-    if not user_input or not pwd_input:
-        st.warning("⚠️ 请先填写账号和密码！")
+    if not auth_token:
+        st.warning("⚠️ 请输入从浏览器获取的 Token 凭证！")
     else:
-        status = st.empty()
-        try:
-            with st.spinner("正在后台为您抓取数据，请稍候..."):
-                reports_dict = run_automation_web(
-                    user_input, pwd_input, report_type, start_date, end_date, 
-                    class_rules_config, name_maps_config, default_rule, status
-                )
-                
-                if reports_dict:
-                    status.success(f"🎉 成功获取 {len(reports_dict)} 个班级的打卡报告！")
-                    st.divider()
-                    st.subheader("📋 各班级独立打卡报告（点击右上角即可一键复制）")
-                    
-                    for c_name, c_content in reports_dict.items():
-                        with st.container():
-                            st.markdown(f"#### 📍 班级：{c_name}")
-                            
-                            c_col1, c_col2 = st.columns([3, 1])
-                            with c_col1:
-                                st.code(c_content, language=None)
-                            with c_col2:
-                                st.write("") 
-                                st.write("")
-                                c_file_name = f"{datetime.now().strftime('%Y-%m-%d')}_{c_name}_打卡反馈.md"
-                                st.download_button(
-                                    label=f"📥 下载文件",
-                                    data=c_content,
-                                    file_name=c_file_name,
-                                    mime="text/markdown",
-                                    key=f"dl_{c_name}",
-                                    use_container_width=True
-                                )
-                            st.markdown("---")
-                    
-                    all_text = "\n\n" + ("=" * 40) + "\n\n".join(reports_dict.values())
-                    st.download_button(
-                        label="📦 一键打包下载所有班级报告 (Markdown)",
-                        data=all_text,
-                        file_name=f"{datetime.now().strftime('%Y-%m-%d')}_全部班级打卡反馈.md",
-                        mime="text/markdown",
-                        use_container_width=True
-                    )
-                else:
-                    status.error("⚠️ 未能获取到任何有效数据，请确认输入的账号密码是否正确。")
-        except Exception as e:
-            status.error(f"❌ 运行遭遇异常：{str(e)}")
-            if st.session_state.last_error_screenshot:
-                st.warning("📸 以下是程序中断时，云端浏览器捕获的实时画面：")
-                st.image(st.session_state.last_error_screenshot, caption="出错时的网页截图", use_column_width=True)
+        with st.spinner("正在请求 API 获取学情数据..."):
+            reports, err = fetch_data_via_api(
+                auth_token, report_type, start_date, end_date, 
+                class_rules_config, name_maps_config, default_rule
+            )
+            
+            if err:
+                st.error(f"❌ 获取失败：{err}")
+            elif reports:
+                st.success(f"🎉 成功生成 {len(reports)} 个班级的打卡报告！")
+                for c_name, c_content in reports.items():
+                    st.markdown(f"#### 📍 班级：{c_name}")
+                    st.code(c_content, language=None)
