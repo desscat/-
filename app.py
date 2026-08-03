@@ -191,35 +191,46 @@ def run_automation_web(username, password, report_type, start_date, end_date, cl
                             tab_elem.click()
                             page.wait_for_timeout(3000)
                     else:
-                        # 针对“今日汇报”或“自定义”，强制走自定义时间框筛选，保证能稳稳拿到指定日期（如昨天）
+                        # 针对“今日汇报”或“自定义”，强制走自定义时间框筛选，并保证稳定抓取
                         date_title = f"{start_date.strftime('%m月%d日')}"
                         
-                        custom_tab = page.query_selector("text=自定义")
-                        if custom_tab:
-                            custom_tab.click()
-                            page.wait_for_timeout(1500)
+                        # 1. 点击“自定义”标签
+                        try:
+                            page.click("text=自定义", timeout=5000)
+                        except:
+                            pass
+                        page.wait_for_timeout(1500)
                         
-                        date_inputs = page.query_selector_all(".el-range-input, input[placeholder*='日期']")
-                        if len(date_inputs) >= 2:
-                            date_inputs[0].click()
-                            page.keyboard.press("Control+A")
-                            page.keyboard.press("Backspace")
-                            date_inputs[0].type(start_date.strftime("%Y-%m-%d"))
-                            page.wait_for_timeout(300)
-
-                            date_inputs[1].click()
-                            page.keyboard.press("Control+A")
-                            page.keyboard.press("Backspace")
-                            date_inputs[1].type(end_date.strftime("%Y-%m-%d"))
-                            page.wait_for_timeout(300)
+                        # 2. 定位并填充开始和结束日期输入框
+                        try:
+                            date_inputs = page.locator(".el-range-input").all()
+                            if len(date_inputs) < 2:
+                                date_inputs = page.locator("input[placeholder*='日期'], input.el-input__inner").all()
                             
-                            page.keyboard.press("Enter")
-                            page.wait_for_timeout(500)
+                            if len(date_inputs) >= 2:
+                                date_inputs[0].click()
+                                page.keyboard.press("Control+A")
+                                page.keyboard.press("Backspace")
+                                date_inputs[0].fill(start_date.strftime("%Y-%m-%d"))
+                                page.wait_for_timeout(300)
+
+                                date_inputs[1].click()
+                                page.keyboard.press("Control+A")
+                                page.keyboard.press("Backspace")
+                                date_inputs[1].fill(end_date.strftime("%Y-%m-%d"))
+                                page.wait_for_timeout(300)
+                                
+                                page.keyboard.press("Enter")
+                                page.wait_for_timeout(500)
+                        except Exception as e:
+                            print(f"[WARN] 填入日期异常: {e}")
                         
-                        search_btn = page.query_selector("button:has-text('查看')")
-                        if search_btn:
-                            search_btn.click()
-                            page.wait_for_timeout(3000)
+                        # 3. 点击“查看”按钮
+                        try:
+                            page.click("button:has-text('查看')", timeout=5000)
+                        except:
+                            pass
+                        page.wait_for_timeout(3000)
 
                     # 显式等待学生名单数据表出现
                     page.wait_for_selector("tbody tr", timeout=15000)
