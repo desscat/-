@@ -45,7 +45,7 @@ default_template = """[以下为{date_title}的打卡情况]
 
 init_template = urllib.parse.unquote(stored_template) if stored_template else default_template
 
-# Session 状态同步
+# Session 状态初始化
 if "class_rules" not in st.session_state:
     st.session_state.class_rules = init_rules
 
@@ -239,7 +239,6 @@ def fetch_data_via_api(auth_token, report_type, start_date, end_date, class_rule
                     })
 
                 base_rule = next((class_rules_config[k] for k in class_rules_config if k in class_name or class_name in k), default_rule)
-                # 根据天数自动乘倍
                 matched_rule = {
                     "listen": base_rule["listen"] * days_count,
                     "anim": base_rule["anim"] * days_count,
@@ -262,10 +261,14 @@ def fetch_data_via_api(auth_token, report_type, start_date, end_date, class_rule
 # ==================== 4. 界面展示 ====================
 st.subheader("1. 身份凭证与时间选择")
 
-# 增加重置按钮（用于清理分享链接带来的缓存和旧班级数据）
-if st.button("🧹 退出当前账号 / 清除缓存重置"):
-    st.session_state.clear()
-    st.query_params.clear()
+# 修复重置按钮逻辑：清除参数并重置关键 session
+if st.button("🧹 退出当前账号 / 清除缓存重置", type="secondary"):
+    st.session_state.token = ""
+    st.session_state.class_rules = {}
+    st.session_state.name_maps = {}
+    st.session_state.custom_template = default_template
+    for key in list(st.query_params.keys()):
+        del st.query_params[key]
     st.success("✨ 缓存已清空，页面已重置！")
     st.rerun()
 
