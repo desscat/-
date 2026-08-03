@@ -4,6 +4,10 @@ import json
 import time
 from datetime import datetime, date, timedelta
 import streamlit as st
+
+# 自动在 Streamlit 云端安装 Playwright 浏览器内核
+os.system("playwright install chromium")
+
 from playwright.sync_api import sync_playwright
 
 # ==================== 1. 页面配置 ====================
