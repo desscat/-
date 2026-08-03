@@ -371,9 +371,9 @@ with col_right:
             st.session_state.name_maps = config_data.get("maps", {})
             st.success("✅ 配置恢复成功！")
         except Exception:
-            st.error("导入失败，文件格式有误.")
+            st.error("导入失败，文件格式有误。")
 
-# ==================== 5. 执行逻辑（增加显式复制组件） ====================
+# ==================== 5. 执行逻辑（干净整洁的单行一键复制卡片） ====================
 if submit_button:
     if not user_input or not pwd_input:
         st.warning("⚠️ 请先填写账号和密码！")
@@ -389,21 +389,22 @@ if submit_button:
                 if reports_dict:
                     status.success(f"🎉 成功获取 {len(reports_dict)} 个班级的打卡报告！")
                     st.divider()
-                    st.subheader("📋 各班级独立打卡报告")
+                    st.subheader("📋 各班级独立打卡报告（点击右上角即可一键复制）")
                     
                     for c_name, c_content in reports_dict.items():
                         with st.container():
-                            st.markdown(f"### 📍 班级：{c_name}")
-                            st.text_area("文本内容", value=c_content, height=220, key=f"area_{c_name}", label_visibility="collapsed")
+                            st.markdown(f"#### 📍 班级：{c_name}")
                             
-                            # 增加显式复制和下载按钮并排显示
-                            btn_col1, btn_col2 = st.columns(2)
-                            with btn_col1:
-                                st.code(c_content, language=None) # 利用代码块自带的清晰一键复制按钮
-                            with btn_col2:
+                            # 只保留一个自带一键复制按钮的代码块，左右两侧对齐下载按钮
+                            c_col1, c_col2 = st.columns([3, 1])
+                            with c_col1:
+                                st.code(c_content, language=None)
+                            with c_col2:
+                                st.write("") # 占位对齐
+                                st.write("")
                                 c_file_name = f"{datetime.now().strftime('%Y-%m-%d')}_{c_name}_打卡反馈.md"
                                 st.download_button(
-                                    label=f"📥 下载【{c_name}】Markdown报告",
+                                    label=f"📥 下载文件",
                                     data=c_content,
                                     file_name=c_file_name,
                                     mime="text/markdown",
