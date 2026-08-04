@@ -1,17 +1,16 @@
 import os
-import time
-import requests
 from datetime import datetime, date, timedelta
+import requests
 
-# 引入 app.py 中的抓取和生成逻辑
-from app import run_automation_web, generate_markdown
+# 从独立的纯逻辑核心中导入自动化抓取函数
+from iread_core import run_automation
 
 # ==================== 1. 配置参数（优先从 GitHub 环境变量读取） ====================
 PUSHPLUS_TOKEN = os.environ.get("PUSHPLUS_TOKEN", "你的PushPlus_Token") 
 IREAD_USER = os.environ.get("IREAD_USER", "你的全阅读账号")
 IREAD_PWD = os.environ.get("IREAD_PWD", "你的全阅读密码")
 
-# 班级考核标准配置（根据你的实际班级修改）
+# 班级考核标准配置
 CLASS_RULES_CONFIG = {
     "康乐E4": {"listen": 40, "anim": 15, "books": 2},
     "康乐K11": {"listen": 60, "anim": 15, "books": 2},
@@ -19,7 +18,7 @@ CLASS_RULES_CONFIG = {
     "康乐K31": {"listen": 60, "anim": 15, "books": 2},
 }
 
-# 英文名映射配置（如果没有映射可以留空）
+# 英文名映射配置
 NAME_MAPS_CONFIG = {
     "康乐E4": ""
 }
@@ -36,7 +35,7 @@ def send_to_wechat(title, content):
         "token": PUSHPLUS_TOKEN,
         "title": title,
         "content": content,
-        "template": "markdown"  # 使用 Markdown 保持清晰排版
+        "template": "markdown" 
     }
     
     try:
@@ -51,39 +50,26 @@ def send_to_wechat(title, content):
 
 
 # ==================== 3. 核心执行逻辑 ====================
-class DummyStatus:
-    """模拟 Streamlit 的 status 占位符，以便在终端或日志中打印信息"""
-    def info(self, msg): print(f"[INFO] {msg}")
-    def success(self, msg): print(f"[SUCCESS] {msg}")
-    def warning(self, msg): print(f"[WARN] {msg}")
-    def error(self, msg): print(f"[ERROR] {msg}")
-
 def execute_daily_report():
     print(f"\n==================== ⏰ 自动打卡任务开始 [{datetime.now()}] ====================")
-    status = DummyStatus()
     
     # 🎯 计算并获取【昨天】的日期
     yesterday = date.today() - timedelta(days=1)
     
     try:
-        # 执行抓取，将 report_type 设为 "自定义"，并将开始和结束都设为【昨天】
-        report_text = run_automation_web(
+        # 执行抓取
+        report_text = run_automation(
             username=IREAD_USER,
             password=IREAD_PWD,
-            report_type="自定义",
             start_date=yesterday,
             end_date=yesterday,
             class_rules_config=CLASS_RULES_CONFIG,
             name_maps_config=NAME_MAPS_CONFIG,
-            default_rule=DEFAULT_RULE,
-            status_placeholder=status
+            default_rule=DEFAULT_RULE
         )
         
         if report_text and report_text.strip():
-            # 拼接微信推送标题（显示为昨天的日期）
             title = f"📚 全阅读学情打卡报告 ({yesterday.strftime('%m月%d日')})"
-            
-            # 发送到微信
             send_to_wechat(title, report_text)
         else:
             print("⚠️ 未获取到有效报告，跳过微信推送。")
@@ -91,7 +77,6 @@ def execute_daily_report():
     except Exception as e:
         error_msg = f"❌ 今日定时任务运行失败：{str(e)}"
         print(error_msg)
-        # 抓取失败时也发条通知提醒你检查
         send_to_wechat("⚠️ 全阅读自动打卡报错提醒", error_msg)
 
 
