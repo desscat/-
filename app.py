@@ -4,11 +4,9 @@ import streamlit.components.v1 as components
 from datetime import date, timedelta
 from iread_core import auto_login, fetch_data_via_api, DEFAULT_TEMPLATE, DEFAULT_MATRIX_TEMPLATE
 
-# 初始化 Session State
 if "btn_clicked" not in st.session_state:
     st.session_state.btn_clicked = False
 
-# 根据是否点击了生成按钮，动态控制侧边栏是展开还是自动折叠
 sidebar_state = "collapsed" if st.session_state.btn_clicked else "expanded"
 
 st.set_page_config(
@@ -20,7 +18,6 @@ st.set_page_config(
 
 st.title("⚡ 全阅读学情打卡生成器")
 
-# ==================== Emoji 主题包配置 ====================
 EMOJI_PRESETS = {
     "自定义": None,
     "🍓 水果派对": {"full": "🍓", "part": "✅", "zero": "🚫", "badge": "✔️"},
@@ -29,7 +26,6 @@ EMOJI_PRESETS = {
     "🏆 勋章荣誉": {"full": "🏆", "part": "🥇", "zero": "❌", "badge": "🎖️"}
 }
 
-# ==================== 1. URL 持久化配置 ====================
 params = st.query_params
 url_token = params.get("token", "")
 
@@ -72,7 +68,6 @@ def save_to_url():
     st.query_params["matrix_template"] = st.session_state.matrix_template
     st.query_params["emojis"] = json.dumps(st.session_state.emojis, ensure_ascii=False)
 
-# ==================== 2. 左侧边栏配置区 ====================
 with st.sidebar:
     st.header("⚙️ 参数配置")
     
@@ -192,7 +187,6 @@ with st.sidebar:
         st.session_state.btn_clicked = True
         st.rerun()
 
-# ==================== 3. 主界面展示区 ====================
 if st.session_state.btn_clicked:
     final_token = ""
     if username_input and password_input:
@@ -228,7 +222,6 @@ if st.session_state.btn_clicked:
                 for idx, (c_name, c_content) in enumerate(reports.items()):
                     st.markdown(f"### 📍 {c_name} 打卡报告")
                     
-                    # 1. 计算全勤/加油/未打卡人数
                     lines = c_content.split('\n')
                     f_emoji = st.session_state.emojis.get("full", "⭐")
                     p_emoji = st.session_state.emojis.get("part", "✨")
@@ -246,7 +239,6 @@ if st.session_state.btn_clicked:
                     total_students = full_cnt + part_cnt + zero_cnt
                     pct = round(full_cnt / total_students * 100) if total_students > 0 else 0
                     
-                    # 2. 生成动态统计文案
                     stats_text = (
                         f"📊 学情统计汇总：\n"
                         f"🌟 全勤达标：{full_cnt} 人（{pct}%）\n"
@@ -254,10 +246,8 @@ if st.session_state.btn_clicked:
                         f"⚠️ 未打卡提醒：{zero_cnt} 人"
                     )
                     
-                    # 替换模板中的 {stats} 占位符
                     final_share_content = c_content.replace("{stats}", stats_text).strip()
 
-                    # 转义特殊字符，规避 JS 字符串拼接语法错误
                     escaped_content = (
                         final_share_content.replace("\\", "\\\\")
                         .replace("`", "\\`")
