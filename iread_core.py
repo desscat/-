@@ -88,14 +88,10 @@ def fetch_data_via_api(token, report_type, start_date, end_date, class_rules, na
     }
 
     try:
-        # 1. 先获取老师名下的班级列表，拿到班级名称和对应的 id
-        classes_url = "https://v2.ireadabc.com/api/teacher/classes" # 或者通用的获取班级列表接口
-        # 如果上一步获取班级列表用的是别的路由，也可以直接通过通用列表获取，这里尝试兼容多路线
-        # 让我们先请求教师班级列表
-        cls_resp = requests.get("https://v2.ireadabc.com/api/classes", headers=headers, timeout=10)
+        # 1. 获取老师名下的班级列表
+        cls_resp = requests.get("https://v2.ireadabc.com/api/teacher/classes", headers=headers, timeout=10)
         if cls_resp.status_code != 200:
-            # 尝试备用班级接口
-            cls_resp = requests.get("https://v2.ireadabc.com/api/teacher/classes", headers=headers, timeout=10)
+            cls_resp = requests.get("https://v2.ireadabc.com/api/classes", headers=headers, timeout=10)
             
         if cls_resp.status_code != 200:
             return None, f"获取班级列表失败 (HTTP {cls_resp.status_code})"
@@ -104,6 +100,8 @@ def fetch_data_via_api(token, report_type, start_date, end_date, class_rules, na
         classes_data = cls_json.get("data", [])
         if not classes_data and isinstance(cls_json, list):
             classes_data = cls_json
+        if isinstance(classes_data, dict):
+            classes_data = classes_data.get("list", []) or classes_data.get("classes", [])
 
         if not classes_data:
             return None, "未能在该账号下找到任何班级数据"
@@ -120,34 +118,15 @@ def fetch_data_via_api(token, report_type, start_date, end_date, class_rules, na
                             parsed_maps[c_name][parts[0].strip()] = parts[1].strip()
 
         reports = {}
-        s_str = s_date.strftime("%Y-%m-%d")
-        e_str = e_date.strftime("%Y-%m-%d")
 
         for cls_item in classes_data:
-            c_name = cls_item.get("className") or cls_item.get("name")
-            c_id = cls_item.get("classId") or cls_item.get("id")
+            c_name = cls_item.get("className") or cls_item.get("name") or cls_item.get("class_name")
+            c_id = cls_item.get("classId") or cls_item.get("id") or cls_item.get("class_id")
             
             if not c_name or not c_id:
                 continue
                 
             if class_rules and c_name not in class_rules:
-                continue
-
-            # 2. 按照新版 v3 接口规范逐个班级拉取学情数据
-            detail_url = f"https://v2.ireadabc.com/api/v3/reports/statistics/class/{c_id}?start={s_str}&end={e_str}"
-            det_resp = requests.get(detail_url, headers=headers, timeout=10)
-            
-            if det_resp.status_code != 200:
-                continue
-                
-            det_json = det_resp.json()
-            students = det_json.get("data", [])
-            if not students and isinstance(det_json, list):
-                students = det_json
-            if not students and isinstance(det_json.get("data"), dict):
-                students = det_json.get("data", {}).get("students", [])
-
-            if not students:
                 continue
 
             rule = class_rules.get(c_name, default_rule)
@@ -163,16 +142,48 @@ def fetch_data_via_api(token, report_type, start_date, end_date, class_rules, na
                 e_badge = emoji_config.get("badge", "👑") if emoji_config else "👑"
 
                 matrix_lines = []
+                # 先拉取每个学生一段日期内的记录汇总或按天循环
+                # 这里我们通过循环每一天请求对应日期的 detail 接口来聚合矩阵数据
+                all_days_students_map = {} # { student_name: { date_str: {listen, anim, books} } }
+
+                for i in range(days_count):
+                    day_dt = s_date + timedelta(days=i)
+                    day_str = day_dt.strftime("%Y-%m-%d")
+                    
+                    detail_url = f"https://v2.ireadabc.com/api/reports/class/{c_id}/detail/{day_str}"
+                    det_resp = requests.get(detail_url, headers=headers, timeout=8)
+                    if det_resp.status_code == 200:
+                        det_json = det_resp.json()
+                        st_list = det_json.get("data", [])
+                        if not st_list and isinstance(det_json, list):
+                            st_list = det_json
+                        if isinstance(st_list, dict):
+                            st_list = st_list.get("students", []) or st_list.get("list", [])
+                        
+                        for st in st_list:
+                            s_name = st.get("studentName") or st.get("name", "")
+                            if not s_name:
+                                continue
+                            if s_name not in all_days_students_map:
+                                all_days_students_map[s_name] = {}
+                            
+                            all_days_students_map[s_name][day_str] = {
+                                "listen": st.get("listenTime") or st.get("listen_time", 0),
+                                "anim": st.get("animTime") or st.get("anim_time", 0),
+                                "books": st.get("booksCount") or st.get("books_count", 0)
+                            }
+
+                if not all_days_students_map:
+                    continue
+
                 t_listen = rule.get("listen", 60)
                 t_anim = rule.get("anim", 15)
                 t_books = rule.get("books", 2)
 
-                for stu in students:
-                    zh_name = stu.get("studentName") or stu.get("name", "")
+                for zh_name, day_records in all_days_students_map.items():
                     en_name = c_map.get(zh_name, "")
                     display_name = f"{zh_name}{en_name}"
                     
-                    records = stu.get("records", [])
                     daily_emojis = []
                     full_days = 0
 
@@ -180,11 +191,11 @@ def fetch_data_via_api(token, report_type, start_date, end_date, class_rules, na
                         day_dt = s_date + timedelta(days=i)
                         day_str = day_dt.strftime("%Y-%m-%d")
                         
-                        rec = next((r for r in records if r.get("date") == day_str), None)
+                        rec = day_records.get(day_str)
                         if rec:
-                            l_time = rec.get("listenTime", 0)
-                            a_time = rec.get("animTime", 0)
-                            b_cnt = rec.get("booksCount", 0)
+                            l_time = rec.get("listen", 0)
+                            a_time = rec.get("anim", 0)
+                            b_cnt = rec.get("books", 0)
                             
                             is_listen = l_time >= t_listen
                             is_anim = a_time >= t_anim
@@ -214,8 +225,39 @@ def fetch_data_via_api(token, report_type, start_date, end_date, class_rules, na
                 )
 
             else:
+                # 传统分组模式：如果是单天直接请求该天，如果是多天则累加
                 days_count = max(1, (e_date - s_date).days + 1)
                 date_title = f"{s_date.month}月{s_date.day}日" if s_date == e_date else f"{s_date.month}.{s_date.day}-{e_date.month}.{e_date.day}"
+
+                student_aggregated = {}
+
+                for i in range(days_count):
+                    day_dt = s_date + timedelta(days=i)
+                    day_str = day_dt.strftime("%Y-%m-%d")
+                    
+                    detail_url = f"https://v2.ireadabc.com/api/reports/class/{c_id}/detail/{day_str}"
+                    det_resp = requests.get(detail_url, headers=headers, timeout=8)
+                    if det_resp.status_code == 200:
+                        det_json = det_resp.json()
+                        st_list = det_json.get("data", [])
+                        if not st_list and isinstance(det_json, list):
+                            st_list = det_json
+                        if isinstance(st_list, dict):
+                            st_list = st_list.get("students", []) or st_list.get("list", [])
+                        
+                        for st in st_list:
+                            s_name = st.get("studentName") or st.get("name", "")
+                            if not s_name:
+                                continue
+                            if s_name not in student_aggregated:
+                                student_aggregated[s_name] = {"listen": 0, "anim": 0, "books": 0}
+                            
+                            student_aggregated[s_name]["listen"] += (st.get("listenTime") or st.get("listen_time", 0))
+                            student_aggregated[s_name]["anim"] += (st.get("animTime") or st.get("anim_time", 0))
+                            student_aggregated[s_name]["books"] += (st.get("booksCount") or st.get("books_count", 0))
+
+                if not student_aggregated:
+                    continue
 
                 t_listen = rule.get("listen", 60) * days_count
                 t_anim = rule.get("anim", 15) * days_count
@@ -223,14 +265,13 @@ def fetch_data_via_api(token, report_type, start_date, end_date, class_rules, na
 
                 both, listen_only, anim_only, books, none = [], [], [], [], []
 
-                for stu in students:
-                    zh_name = stu.get("studentName") or stu.get("name", "")
+                for zh_name, totals in student_aggregated.items():
                     en_name = c_map.get(zh_name, "")
                     display_name = f"{zh_name}({en_name})" if en_name else zh_name
 
-                    l_time = stu.get("totalListenTime") or stu.get("listenTime", 0)
-                    a_time = stu.get("totalAnimTime") or stu.get("animTime", 0)
-                    b_cnt = stu.get("totalBooksCount") or stu.get("booksCount", 0)
+                    l_time = totals["listen"]
+                    a_time = totals["anim"]
+                    b_cnt = totals["books"]
 
                     is_listen = l_time >= t_listen
                     is_anim = a_time >= t_anim
@@ -268,7 +309,7 @@ def fetch_data_via_api(token, report_type, start_date, end_date, class_rules, na
                 )
 
         if not reports:
-            return None, "未能成功解析到任何班级的打卡统计数据"
+            return None, "未能成功解析到任何班级的打卡统计数据，请确认左侧是否添加并勾选了对应班级名称"
 
         return reports, None
 
