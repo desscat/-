@@ -254,7 +254,7 @@ if st.session_state.btn_clicked:
                             f"📊 学情统计汇总：\n"
                             f"🌟 全勤达标：{full_cnt} 人 ({pct}%)\n"
                             f"💪 持续加油：{part_cnt} 人\n"
-                            f"⚠️ 未打卡预警：{zero_cnt} 人"
+                            f"⚠️ 未打卡提醒：{zero_cnt} 人"
                         )
                         final_share_content += stats_text
 
