@@ -23,16 +23,12 @@ DEFAULT_TEMPLATE = """📌 {class_name} {report_type}（{date_title}）
 --------------------
 💡 达标标准：每日听音 ≥ {target_listen}分钟，每日动画 ≥ {target_anim}分钟，绘本 ≥ {target_books}本。"""
 
+# 修复：移除了上方重复的学情统计文字，只保留矩阵与底部的 {stats} 占位符和提醒
 DEFAULT_MATRIX_TEMPLATE = """❤️ {date_title} 全阅读打卡 ❤️
 
 {matrix}
 
 --------------------
-📊 【学情统计】
-• 班级总人数：{total_students} 人
-• 全勤全达标（皇冠👑）：{full_attendance_count} 人
-• 本阶段打卡率：{attendance_rate}%
-
 {stats}
 
 💡 提醒：昨天未打卡100%的小朋友尽快补上~，完成百分百💯的小朋友很棒哦[加油][加油][加油]学习要趁早，打卡不能少"""
@@ -138,7 +134,6 @@ def fetch_data_via_api(auth_token, report_type, start_date, end_date, class_rule
                 class_id = str(item.get("id") or item.get("class_id") or item.get("classId"))
                 class_name = item.get("class_name") or item.get("name") or item.get("className") or f"班级_{class_id}"
                 
-                # 修复：不再过滤未在配置中显式声明的班级，而是直接获取并应用对应的规则或默认规则
                 base_rule = class_rules_config.get(class_name, default_rule)
                 matched_map = name_maps_config.get(class_name, "")
                 class_mapping = parse_name_map(matched_map)
@@ -241,7 +236,6 @@ def fetch_data_via_api(auth_token, report_type, start_date, end_date, class_rule
             class_id = str(item.get("id") or item.get("class_id") or item.get("classId"))
             class_name = item.get("class_name") or item.get("name") or item.get("className") or f"班级_{class_id}"
             
-            # 修复：不再强制过滤未配置的班级
             base_rule = class_rules_config.get(class_name, default_rule)
             matched_rule = {k: v * days_count for k, v in base_rule.items()}
             matched_map = name_maps_config.get(class_name, "")
