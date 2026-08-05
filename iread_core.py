@@ -32,9 +32,12 @@ DEFAULT_MATRIX_TEMPLATE = """❤️ {date_title} 全阅读打卡 ❤️
 {stats}"""
 
 def auto_login(username, password):
-    # 已根据抓包更新为最新的登录接口地址
+    # 按照实际 Payload 参数 (phone, password) 构建请求
     url = "https://v2.ireadabc.com/api/login"
-    payload = {"username": username, "password": password}
+    payload = {
+        "phone": str(username).strip(),
+        "password": str(password).strip()
+    }
     headers = {
         "Content-Type": "application/json",
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
@@ -50,7 +53,7 @@ def auto_login(username, password):
         except Exception:
             return None, f"服务器未返回 JSON 数据，响应预览：{resp.text[:100]}"
 
-        # 校验返回数据中的 token
+        # 提取返回数据中的 token
         token = None
         if isinstance(res_json, dict):
             if "data" in res_json and isinstance(res_json["data"], dict):
@@ -61,7 +64,7 @@ def auto_login(username, password):
         if token:
             return token, None
         else:
-            msg = res_json.get("msg") or res_json.get("message") or "登录失败，未获取到有效 Token"
+            msg = res_json.get("msg") or res_json.get("message") or "登录失败，请检查手机号或密码"
             return None, msg
 
     except Exception as e:
@@ -69,7 +72,6 @@ def auto_login(username, password):
 
 def fetch_data_via_api(token, report_type, start_date, end_date, class_rules, name_maps, default_rule, template_str, mode="traditional", emoji_config=None):
     if mode == "matrix":
-        # 矩阵模式：固定获取本周一至今天
         today = date.today()
         s_date = today - timedelta(days=today.weekday())
         e_date = today
@@ -88,7 +90,6 @@ def fetch_data_via_api(token, report_type, start_date, end_date, class_rules, na
         else:
             s_date, e_date = start_date, end_date
 
-    # 已更新域名与路径
     url = f"https://v2.ireadabc.com/api/student-study-records?start_date={s_date}&end_date={e_date}"
     headers = {
         "Authorization": f"Bearer {token}", 
@@ -107,7 +108,6 @@ def fetch_data_via_api(token, report_type, start_date, end_date, class_rules, na
         if not raw_data:
             return None, "暂未查询到该时间段内的学生打卡数据"
 
-        # 解析英文名映射表
         parsed_maps = {}
         for c_name, map_str in name_maps.items():
             parsed_maps[c_name] = {}
@@ -119,7 +119,6 @@ def fetch_data_via_api(token, report_type, start_date, end_date, class_rules, na
                         if len(parts) == 2:
                             parsed_maps[c_name][parts[0].strip()] = parts[1].strip()
 
-        # 按班级归类数据
         grouped_data = {}
         for item in raw_data:
             c_name = item.get("className", "默认班级")
