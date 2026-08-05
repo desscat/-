@@ -3,7 +3,6 @@ from datetime import datetime, timedelta
 from iread_core import run_automation
 
 if __name__ == "__main__":
-    # 从 GitHub Secrets 中安全读取配置
     username = os.environ.get("IREAD_USER")
     password = os.environ.get("IREAD_PWD")
     pushplus_token = os.environ.get("PUSHPLUS_TOKEN")
@@ -12,7 +11,6 @@ if __name__ == "__main__":
         print("错误: 未检测到环境变量 IREAD_USER 或 IREAD_PWD")
         exit(1)
 
-    # 默认统计昨天的数据
     yesterday = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
     print(f"开始执行定时任务，统计日期: {yesterday}")
 
