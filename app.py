@@ -20,7 +20,7 @@ st.set_page_config(
 
 st.title("⚡ 全阅读学情打卡生成器")
 
-# ==================== 5. Emoji 主题包配置 ====================
+# ==================== Emoji 主题包配置 ====================
 EMOJI_PRESETS = {
     "自定义": None,
     "🍓 水果派对": {"full": "🍓", "part": "✅", "zero": "🚫", "badge": "✔️"},
@@ -115,7 +115,6 @@ with st.sidebar:
     st.subheader("3. 🎨 DIY 格式与 Emoji 主题")
     with st.expander("✨ 点击展开/修改模板与 Emoji 主题", expanded=False):
         if output_mode == "🍓 矩阵式周打卡榜":
-            # 改进 5：快捷 Emoji 主题选择
             selected_preset = st.selectbox("选择 Emoji 预设主题", list(EMOJI_PRESETS.keys()), index=1)
             if selected_preset != "自定义" and EMOJI_PRESETS[selected_preset]:
                 st.session_state.emojis = EMOJI_PRESETS[selected_preset]
@@ -224,12 +223,12 @@ if st.session_state.btn_clicked:
             if err:
                 st.error(f"❌ 错误：{err}")
             elif reports:
-                st.toast("🎉 打卡报告生成成功！点击下方红按钮即可一键复制！", icon="✅")
+                st.toast("🎉 打卡报告生成成功！点击下方按钮即可复制/分享！", icon="✅")
                 
                 for idx, (c_name, c_content) in enumerate(reports.items()):
                     st.markdown(f"### 📍 {c_name} 打卡报告")
                     
-                    # 改进 4：班级学情数据指标统计卡片
+                    # 💡 关键改动：计算全勤/加油/未打卡数据，并自动追加在文字下方一起复制
                     lines = c_content.split('\n')
                     f_emoji = st.session_state.emojis.get("full", "🍓")
                     p_emoji = st.session_state.emojis.get("part", "✅")
@@ -245,20 +244,27 @@ if st.session_state.btn_clicked:
                             zero_cnt += 1
 
                     total_students = full_cnt + part_cnt + zero_cnt
-                    if total_students > 0:
-                        col1, col2, col3 = st.columns(3)
-                        col1.metric("🌟 全勤达标", f"{full_cnt} 人", f"{round(full_cnt/total_students*100)}% 占比")
-                        col2.metric("💪 持续加油", f"{part_cnt} 人")
-                        col3.metric("⚠️ 未打卡预警", f"{zero_cnt} 人", delta_color="inverse")
                     
+                    # 拼接统计文案到报告尾部
+                    final_share_content = c_content.strip()
+                    if total_students > 0:
+                        pct = round(full_cnt / total_students * 100)
+                        stats_text = (
+                            f"\n\n--------------------\n"
+                            f"📊 学情统计汇总：\n"
+                            f"🌟 全勤达标：{full_cnt} 人 ({pct}%)\n"
+                            f"💪 持续加油：{part_cnt} 人\n"
+                            f"⚠️ 未打卡预警：{zero_cnt} 人"
+                        )
+                        final_share_content += stats_text
+
                     # 对文本中的特殊字符进行转义
                     escaped_content = (
-                        c_content.replace("\\", "\\\\")
+                        final_share_content.replace("\\", "\\\\")
                         .replace("`", "\\`")
                         .replace("${", "\\${")
                     )
                     
-                    # 改进 1：增加原生 Web Share API 支持（手机端一键拉起微信/系统分享）
                     custom_copy_card = f"""
                     <div style="background-color: #f8f9fa; border: 1px solid #e9ecef; border-radius: 8px; padding: 16px; font-family: monospace; position: relative;">
                         <div style="position: absolute; top: 10px; right: 10px; display: flex; gap: 8px;">
@@ -289,7 +295,7 @@ if st.session_state.btn_clicked:
                             ">📋 复制本班报告</button>
                         </div>
                         
-                        <pre style="margin-top: 30px; margin-bottom: 0; white-space: pre-wrap; word-break: break-word; font-size: 14px; line-height: 1.6; color: #31333f;">{c_content}</pre>
+                        <pre style="margin-top: 30px; margin-bottom: 0; white-space: pre-wrap; word-break: break-word; font-size: 14px; line-height: 1.6; color: #31333f;">{final_share_content}</pre>
                     </div>
 
                     <script>
@@ -346,7 +352,7 @@ if st.session_state.btn_clicked:
                     </script>
                     """
                     
-                    line_count = len(c_content.split('\n'))
+                    line_count = len(final_share_content.split('\n'))
                     card_height = max(220, line_count * 24 + 80)
                     
                     components.html(custom_copy_card, height=card_height)
