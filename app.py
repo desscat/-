@@ -7,7 +7,7 @@ st.set_page_config(page_title="全阅读学情打卡生成器", page_icon="⚡",
 
 st.title("⚡ 全阅读学情打卡生成器")
 
-# ==================== 1. URL 持久化 ====================
+# ==================== 1. URL 持久化配置 ====================
 params = st.query_params
 url_token = params.get("token", "")
 
@@ -23,7 +23,11 @@ except:
 
 url_template = params.get("template", DEFAULT_TEMPLATE)
 url_matrix_template = params.get("matrix_template", DEFAULT_MATRIX_TEMPLATE)
-url_emojis = json.loads(params.get("emojis", '{"full": "🍓", "part": "✅", "zero": "🚫", "badge": "✔️"}'))
+
+try:
+    url_emojis = json.loads(params.get("emojis", '{"full": "🍓", "part": "✅", "zero": "🚫", "badge": "✔️"}'))
+except:
+    url_emojis = {"full": "🍓", "part": "✅", "zero": "🚫", "badge": "✔️"}
 
 if "token" not in st.session_state:
     st.session_state.token = url_token
@@ -46,7 +50,7 @@ def save_to_url():
     st.query_params["matrix_template"] = st.session_state.matrix_template
     st.query_params["emojis"] = json.dumps(st.session_state.emojis, ensure_ascii=False)
 
-# ==================== 2. 左侧边栏 ====================
+# ==================== 2. 左侧边栏配置区 ====================
 with st.sidebar:
     st.header("⚙️ 参数配置")
     
@@ -75,6 +79,7 @@ with st.sidebar:
     output_mode = st.radio("选择输出格式", ["🍓 矩阵式周打卡榜", "📋 传统分组文字汇总"], index=0)
     
     if output_mode == "🍓 矩阵式周打卡榜":
+        st.caption("💡 矩阵模式：自动统计本周一至今天的每日打卡情况，实时生成 Emoji 矩阵。")
         report_type = "周汇报"
         start_date, end_date = date.today(), date.today()
     else:
@@ -99,7 +104,7 @@ with st.sidebar:
             st.session_state.emojis = {"full": e_full, "part": e_part, "zero": e_zero, "badge": e_badge}
             
             st.markdown("**自定义矩阵模板：**")
-            mat_tmpl_input = st.text_area("矩阵模板", value=st.session_state.matrix_template, height=150)
+            mat_tmpl_input = st.text_area("矩阵模板", value=st.session_state.matrix_template, height=120)
             if mat_tmpl_input != st.session_state.matrix_template:
                 st.session_state.matrix_template = mat_tmpl_input
             save_to_url()
@@ -152,7 +157,7 @@ with st.sidebar:
     st.divider()
     btn_generate = st.button("⚡ 一键生成打卡报告", type="primary", use_container_width=True)
 
-# ==================== 3. 主界面（打卡结果） ====================
+# ==================== 3. 主界面展示区 ====================
 if btn_generate:
     final_token = ""
     if username_input and password_input:
@@ -171,7 +176,7 @@ if btn_generate:
     if not final_token:
         st.warning("⚠️ 请先在左侧边栏填写账号密码或 Token！")
     else:
-        with st.spinner("⚡ 正在获取全阅读打卡数据..."):
+        with st.spinner("⚡ 正在抓取打卡数据并生成报告..."):
             mode_key = "matrix" if output_mode.startswith("🍓") else "traditional"
             curr_tmpl = st.session_state.matrix_template if mode_key == "matrix" else st.session_state.custom_template
             
@@ -188,4 +193,4 @@ if btn_generate:
                     st.markdown(f"### 📍 {c_name} 打卡报告")
                     st.code(c_content, language=None)
 else:
-    st.info("👈 请在左侧边栏设置规则与 Emoji，点击 **「⚡ 一键生成打卡报告」** 即可。")
+    st.info("👈 请在左侧边栏配置班级与规则，点击 **「⚡ 一键生成打卡报告」** 即可。")
