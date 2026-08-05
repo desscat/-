@@ -1,7 +1,7 @@
 import json
 import streamlit as st
 from datetime import date, timedelta
-from iread_core import auto_login, fetch_data_via_api, DEFAULT_TEMPLATE
+from iread_core import auto_login, fetch_data_via_api, DEFAULT_TEMPLATE, DEFAULT_MATRIX_TEMPLATE
 
 st.set_page_config(page_title="全阅读学情打卡生成器", page_icon="⚡", layout="wide")
 
@@ -22,6 +22,8 @@ except:
     url_maps = {}
 
 url_template = params.get("template", DEFAULT_TEMPLATE)
+url_matrix_template = params.get("matrix_template", DEFAULT_MATRIX_TEMPLATE)
+url_emojis = json.loads(params.get("emojis", '{"full": "🍓", "part": "✅", "zero": "🚫", "badge": "✔️"}'))
 
 if "token" not in st.session_state:
     st.session_state.token = url_token
@@ -31,14 +33,20 @@ if "name_maps" not in st.session_state:
     st.session_state.name_maps = url_maps
 if "custom_template" not in st.session_state:
     st.session_state.custom_template = url_template
+if "matrix_template" not in st.session_state:
+    st.session_state.matrix_template = url_matrix_template
+if "emojis" not in st.session_state:
+    st.session_state.emojis = url_emojis
 
 def save_to_url():
     st.query_params["token"] = st.session_state.token
     st.query_params["rules"] = json.dumps(st.session_state.class_rules, ensure_ascii=False)
     st.query_params["maps"] = json.dumps(st.session_state.name_maps, ensure_ascii=False)
     st.query_params["template"] = st.session_state.custom_template
+    st.query_params["matrix_template"] = st.session_state.matrix_template
+    st.query_params["emojis"] = json.dumps(st.session_state.emojis, ensure_ascii=False)
 
-# ==================== 2. 左侧边栏（精简配置区） ====================
+# ==================== 2. 左侧边栏 ====================
 with st.sidebar:
     st.header("⚙️ 参数配置")
     
@@ -48,6 +56,8 @@ with st.sidebar:
         st.session_state.class_rules = {}
         st.session_state.name_maps = {}
         st.session_state.custom_template = DEFAULT_TEMPLATE
+        st.session_state.matrix_template = DEFAULT_MATRIX_TEMPLATE
+        st.session_state.emojis = {"full": "🍓", "part": "✅", "zero": "🚫", "badge": "✔️"}
         st.rerun()
 
     st.subheader("1. 身份凭证")
@@ -61,19 +71,43 @@ with st.sidebar:
             st.session_state.token = token_input
             save_to_url()
 
-    st.subheader("2. 时间选择")
-    report_type = st.radio("统计周期", ["昨日汇报", "周汇报", "月汇报", "自定义时间"])
+    st.subheader("2. 模式与时间选择")
+    output_mode = st.radio("选择输出格式", ["🍓 矩阵式周打卡榜", "📋 传统分组文字汇总"], index=0)
     
-    start_date, end_date = date.today(), date.today()
-    if report_type == "自定义时间":
-        start_date = st.date_input("开始日期", value=date.today() - timedelta(days=1))
-        end_date = st.date_input("结束日期", value=date.today())
+    if output_mode == "🍓 矩阵式周打卡榜":
+        report_type = "周汇报"
+        start_date, end_date = date.today(), date.today()
+    else:
+        report_type = st.radio("统计周期", ["昨日汇报", "周汇报", "月汇报", "自定义时间"])
+        start_date, end_date = date.today(), date.today()
+        if report_type == "自定义时间":
+            start_date = st.date_input("开始日期", value=date.today() - timedelta(days=1))
+            end_date = st.date_input("结束日期", value=date.today())
 
-    st.subheader("3. 🎨 DIY 报告模板")
-    with st.expander("展开/编辑模板", expanded=False):
-        custom_template_input = st.text_area("模板内容：", value=st.session_state.custom_template, height=180)
-        if custom_template_input != st.session_state.custom_template:
-            st.session_state.custom_template = custom_template_input
+    st.subheader("3. 🎨 DIY 格式与 Emoji 自定义")
+    with st.expander("✨ 点击展开/修改模板与 Emoji", expanded=False):
+        if output_mode == "🍓 矩阵式周打卡榜":
+            st.markdown("**自定义 Emoji 标记：**")
+            col_e1, col_e2 = st.columns(2)
+            with col_e1:
+                e_full = st.text_input("全勤达标", value=st.session_state.emojis.get("full", "🍓"))
+                e_part = st.text_input("部分达标", value=st.session_state.emojis.get("part", "✅"))
+            with col_e2:
+                e_zero = st.text_input("未打卡", value=st.session_state.emojis.get("zero", "🚫"))
+                e_badge = st.text_input("满勤尾巴标记", value=st.session_state.emojis.get("badge", "✔️"))
+            
+            st.session_state.emojis = {"full": e_full, "part": e_part, "zero": e_zero, "badge": e_badge}
+            
+            st.markdown("**自定义矩阵模板：**")
+            mat_tmpl_input = st.text_area("矩阵模板", value=st.session_state.matrix_template, height=150)
+            if mat_tmpl_input != st.session_state.matrix_template:
+                st.session_state.matrix_template = mat_tmpl_input
+            save_to_url()
+        else:
+            st.markdown("**自定义传统分组模板：**")
+            custom_tmpl_input = st.text_area("文字模板", value=st.session_state.custom_template, height=180)
+            if custom_tmpl_input != st.session_state.custom_template:
+                st.session_state.custom_template = custom_tmpl_input
             save_to_url()
 
     st.subheader("4. ⚙️ 班级与映射管理")
@@ -138,10 +172,13 @@ if btn_generate:
         st.warning("⚠️ 请先在左侧边栏填写账号密码或 Token！")
     else:
         with st.spinner("⚡ 正在获取全阅读打卡数据..."):
+            mode_key = "matrix" if output_mode.startswith("🍓") else "traditional"
+            curr_tmpl = st.session_state.matrix_template if mode_key == "matrix" else st.session_state.custom_template
+            
             reports, err = fetch_data_via_api(
                 final_token, report_type, start_date, end_date, 
                 class_rules_config, name_maps_config, {"listen": 60, "anim": 15, "books": 2}, 
-                st.session_state.custom_template
+                curr_tmpl, mode=mode_key, emoji_config=st.session_state.emojis
             )
             if err:
                 st.error(f"❌ 错误：{err}")
@@ -151,4 +188,4 @@ if btn_generate:
                     st.markdown(f"### 📍 {c_name} 打卡报告")
                     st.code(c_content, language=None)
 else:
-    st.info("👈 请在左侧边栏设置班级与时间，点击 **「⚡ 一键生成打卡报告」** 即可。")
+    st.info("👈 请在左侧边栏设置规则与 Emoji，点击 **「⚡ 一键生成打卡报告」** 即可。")
