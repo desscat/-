@@ -228,7 +228,7 @@ if st.session_state.btn_clicked:
                 for idx, (c_name, c_content) in enumerate(reports.items()):
                     st.markdown(f"### 📍 {c_name} 打卡报告")
                     
-                    # 💡 关键改动：计算全勤/加油/未打卡数据，并自动追加在文字下方一起复制
+                    # 1. 统计全勤/加油/未打卡人数
                     lines = c_content.split('\n')
                     f_emoji = st.session_state.emojis.get("full", "🍓")
                     p_emoji = st.session_state.emojis.get("part", "✅")
@@ -245,7 +245,7 @@ if st.session_state.btn_clicked:
 
                     total_students = full_cnt + part_cnt + zero_cnt
                     
-                    # 拼接统计文案到报告尾部
+                    # 2. 将学情统计拼接在最底部（原模板提醒文字的下方）
                     final_share_content = c_content.strip()
                     if total_students > 0:
                         pct = round(full_cnt / total_students * 100)
@@ -258,7 +258,7 @@ if st.session_state.btn_clicked:
                         )
                         final_share_content += stats_text
 
-                    # 对文本中的特殊字符进行转义
+                    # 转义特殊字符
                     escaped_content = (
                         final_share_content.replace("\\", "\\\\")
                         .replace("`", "\\`")
