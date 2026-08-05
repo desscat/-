@@ -138,9 +138,7 @@ def fetch_data_via_api(auth_token, report_type, start_date, end_date, class_rule
                 class_id = str(item.get("id") or item.get("class_id") or item.get("classId"))
                 class_name = item.get("class_name") or item.get("name") or item.get("className") or f"班级_{class_id}"
                 
-                if class_rules_config and class_name not in class_rules_config:
-                    continue
-
+                # 修复：不再过滤未在配置中显式声明的班级，而是直接获取并应用对应的规则或默认规则
                 base_rule = class_rules_config.get(class_name, default_rule)
                 matched_map = name_maps_config.get(class_name, "")
                 class_mapping = parse_name_map(matched_map)
@@ -201,7 +199,6 @@ def fetch_data_via_api(auth_token, report_type, start_date, end_date, class_rule
 
                 attendance_rate = round((full_attendance_count / total_students * 100), 1) if total_students > 0 else 0.0
 
-                # 完美对接前端模板中需要的 {stats} 占位符
                 reports_dict[class_name] = template_str.format(
                     date_title=date_title,
                     matrix="\n".join(matrix_lines) if matrix_lines else "（暂无打卡数据）",
@@ -244,8 +241,11 @@ def fetch_data_via_api(auth_token, report_type, start_date, end_date, class_rule
             class_id = str(item.get("id") or item.get("class_id") or item.get("classId"))
             class_name = item.get("class_name") or item.get("name") or item.get("className") or f"班级_{class_id}"
             
-            if class_rules_config and class_name not in class_rules_config:
-                continue
+            # 修复：不再强制过滤未配置的班级
+            base_rule = class_rules_config.get(class_name, default_rule)
+            matched_rule = {k: v * days_count for k, v in base_rule.items()}
+            matched_map = name_maps_config.get(class_name, "")
+            class_mapping = parse_name_map(matched_map)
 
             stats_url = f"https://v2.ireadabc.com/api/v3/reports/statistics/class/{class_id}"
             stat_resp = requests.get(stats_url, headers=headers, params={"start": s_date, "end": e_date}, timeout=15)
@@ -262,11 +262,6 @@ def fetch_data_via_api(auth_token, report_type, start_date, end_date, class_rule
                     "anim": s.get("animation") or s.get("anim") or s.get("animTime") or 0,
                     "books": s.get("grading") or s.get("read") or s.get("booksCount") or 0
                 } for s in students_raw]
-
-                base_rule = class_rules_config.get(class_name, default_rule)
-                matched_rule = {k: v * days_count for k, v in base_rule.items()}
-                matched_map = name_maps_config.get(class_name, "")
-                class_mapping = parse_name_map(matched_map)
 
                 both, listen_only, anim_only, books_list_group, none = [], [], [], [], []
                 
