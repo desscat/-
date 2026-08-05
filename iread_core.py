@@ -32,6 +32,8 @@ DEFAULT_MATRIX_TEMPLATE = """❤️ {date_title} 全阅读打卡 ❤️
 • 全勤全达标（皇冠👑）：{full_attendance_count} 人
 • 本阶段打卡率：{attendance_rate}%
 
+{stats}
+
 💡 提醒：昨天未打卡100%的小朋友尽快补上~，完成百分百💯的小朋友很棒哦[加油][加油][加油]学习要趁早，打卡不能少"""
 
 def parse_name_map(map_str):
@@ -197,8 +199,7 @@ def fetch_data_via_api(auth_token, report_type, start_date, end_date, class_rule
                     matrix_lines.append(line)
 
                 attendance_rate = round((full_attendance_count / total_students * 100), 1) if total_students > 0 else 0.0
-
-                stats_str = f"• 班级总人数：{total_students} 人\n• 全勤全达标：{full_attendance_count} 人\n• 本阶段全勤率：{attendance_rate}%"
+                stats_str = ""
 
                 reports_dict[class_name] = template_str.format(
                     date_title=date_title,
