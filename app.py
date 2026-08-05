@@ -3,7 +3,19 @@ import streamlit as st
 from datetime import date, timedelta
 from iread_core import auto_login, fetch_data_via_api, DEFAULT_TEMPLATE, DEFAULT_MATRIX_TEMPLATE
 
-st.set_page_config(page_title="全阅读学情打卡生成器", page_icon="⚡", layout="wide")
+# 初始化 Session State
+if "btn_clicked" not in st.session_state:
+    st.session_state.btn_clicked = False
+
+# 💡 关键修改点 1：根据是否点击了生成按钮，动态控制侧边栏是展开还是自动折叠
+sidebar_state = "collapsed" if st.session_state.btn_clicked else "expanded"
+
+st.set_page_config(
+    page_title="全阅读学情打卡生成器", 
+    page_icon="⚡", 
+    layout="wide",
+    initial_sidebar_state=sidebar_state # 设为 collapsed 即可自动收起侧边栏
+)
 
 st.title("⚡ 全阅读学情打卡生成器")
 
@@ -55,15 +67,14 @@ with st.sidebar:
     st.header("⚙️ 参数配置")
     
     if st.button("🧹 清空/重置所有配置", type="secondary", use_container_width=True):
-        # 清空 URL
         st.query_params.clear()
-        # 清空 Session 状态
         st.session_state.token = ""
         st.session_state.class_rules = {}
         st.session_state.name_maps = {}
         st.session_state.custom_template = DEFAULT_TEMPLATE
         st.session_state.matrix_template = DEFAULT_MATRIX_TEMPLATE
         st.session_state.emojis = {"full": "🍓", "part": "✅", "zero": "🚫", "badge": "✔️"}
+        st.session_state.btn_clicked = False
         st.rerun()
 
     st.subheader("1. 身份凭证")
@@ -103,7 +114,6 @@ with st.sidebar:
                 e_zero = st.text_input("未打卡", value=st.session_state.emojis.get("zero", "🚫"))
                 e_badge = st.text_input("满勤尾巴标记", value=st.session_state.emojis.get("badge", "✔️"))
             
-            # 修复点 1：只在 Emoji 确实改变时才存入 URL，防止清空后马上又写回
             new_emojis = {"full": e_full, "part": e_part, "zero": e_zero, "badge": e_badge}
             if new_emojis != st.session_state.emojis:
                 st.session_state.emojis = new_emojis
@@ -111,16 +121,12 @@ with st.sidebar:
             
             st.markdown("**自定义矩阵模板：**")
             mat_tmpl_input = st.text_area("矩阵模板", value=st.session_state.matrix_template, height=120)
-            
-            # 修复点 2：把 save_to_url() 放进判断分支内部
             if mat_tmpl_input != st.session_state.matrix_template:
                 st.session_state.matrix_template = mat_tmpl_input
                 save_to_url()
         else:
             st.markdown("**自定义传统分组模板：**")
             custom_tmpl_input = st.text_area("文字模板", value=st.session_state.custom_template, height=180)
-            
-            # 修复点 3：把 save_to_url() 放进判断分支内部
             if custom_tmpl_input != st.session_state.custom_template:
                 st.session_state.custom_template = custom_tmpl_input
                 save_to_url()
@@ -167,8 +173,12 @@ with st.sidebar:
     st.divider()
     btn_generate = st.button("⚡ 一键生成打卡报告", type="primary", use_container_width=True)
 
+    if btn_generate:
+        st.session_state.btn_clicked = True
+        st.rerun() # 触发重新渲染，应用自动收起侧边栏状态
+
 # ==================== 3. 主界面展示区 ====================
-if btn_generate:
+if st.session_state.btn_clicked:
     final_token = ""
     if username_input and password_input:
         with st.spinner("🔑 正在登录..."):
@@ -198,9 +208,11 @@ if btn_generate:
             if err:
                 st.error(f"❌ 错误：{err}")
             elif reports:
-                st.success("🎉 打卡报告生成成功！")
+                st.toast("🎉 打卡报告生成完毕！点击框内右上角即可一键复制！", icon="✅")
                 for c_name, c_content in reports.items():
                     st.markdown(f"### 📍 {c_name} 打卡报告")
+                    
+                    # 💡 关键修改点 2：使用 st.code 生成文本框，右上角自带官方【一键复制】图标，点击后浏览器会自动弹框提示已复制
                     st.code(c_content, language=None)
 else:
     st.info("👈 请在左侧边栏配置班级与规则，点击 **「⚡ 一键生成打卡报告」** 即可。")
