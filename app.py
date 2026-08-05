@@ -1,19 +1,3 @@
-import sys
-import asyncio
-
-# 针对 Python 3.14 彻底修复主线程无 Event Loop 的问题
-if sys.version_info >= (3, 10):
-    try:
-        asyncio.get_running_loop()
-    except RuntimeError:
-        try:
-            loop = asyncio.get_event_loop_policy().get_event_loop()
-            if loop.is_closed():
-                raise RuntimeError()
-        except Exception:
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-
 import streamlit as st
 from datetime import datetime, timedelta
 from iread_core import run_automation, CLASS_RULES_CONFIG
