@@ -2,20 +2,15 @@ import requests
 import json
 from datetime import datetime, timedelta
 
-# 各班级考核标准配置（可根据实际情况调整）
+# 各班级考核标准配置（可根据实际情况修改）
 CLASS_RULES_CONFIG = {
     "你的班级名称1": {"listen": 60, "anim": 15, "books": 2},
     "你的班级名称2": {"listen": 40, "anim": 15, "books": 2},
 }
 
-# 英文名映射配置（中文名:英文名，多行或空着均可）
-NAME_MAPS_CONFIG = {
-    "你的班级名称1": "张三:ZhangSan\n李四:LiSi"
-}
-
 def login_iread(username, password):
     """登录全阅读获取 Token"""
-    url = "https://api.iread.com/v1/user/login"  # 示例API，请保持你原本的接口地址
+    url = "https://api.iread.com/v1/user/login"
     payload = {"username": username, "password": password}
     try:
         response = requests.post(url, json=payload, timeout=10)
@@ -66,7 +61,6 @@ def run_automation(username, password, pushplus_token, target_date=None):
 
     report_content = f"# 📊 每日打卡统计报告\n**统计日期：** {target_date}\n\n"
     
-    # 示例逻辑：遍历配置中的班级进行统计
     for class_name, rules in CLASS_RULES_CONFIG.items():
         report_content += f"### 🏫 班级：{class_name}\n"
         report_content += f"- 听力标准：{rules['listen']}分钟\n"
