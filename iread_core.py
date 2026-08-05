@@ -1,244 +1,243 @@
-import re
 import requests
+import json
 from datetime import date, timedelta
 
-DEFAULT_TEMPLATE = """[以下为{date_title}的打卡情况]
+DEFAULT_TEMPLATE = """📌 {class_name} {report_type}（{date_title}）
 
-🏆 {class_name}
+🌟 【听音&动画双达标】({both_count}人)：
+{both_list}
 
-🌟【今日光荣榜】
-{tops}
+🎵 【仅听音达标】({listen_only_count}人)：
+{listen_only_list}
 
-💪【再努努力】
-{mids}
+📺 【仅动画达标】({anim_only_count}人)：
+{anim_only_list}
 
-⏰【该起床打卡啦】
-{zeros}"""
+📖 【绘本达标】({books_count}人)：
+{books_list}
 
-DEFAULT_MATRIX_TEMPLATE = """❤️{date_title} 全阅读打卡❤️
+❌ 【未达标/未打卡】({none_count}人)：
+{none_list}
 
-{matrix}"""
+--------------------
+💡 达标标准：每日听音 ≥ {target_listen}分钟，每日动画 ≥ {target_anim}分钟，绘本 ≥ {target_books}本。"""
 
-def parse_name_map(map_str):
-    mapping = {}
-    if not map_str:
-        return mapping
-    pairs = re.split(r'[,，\n]', map_str)
-    for pair in pairs:
-        if ":" in pair or "：" in pair:
-            key, val = re.split(r'[:：]', pair, 1)
-            mapping[key.strip()] = val.strip()
-    return mapping
+DEFAULT_MATRIX_TEMPLATE = """❤️ {date_title} 全阅读打卡 ❤️
 
-def clean_num(text):
-    if text is None:
-        return 0
-    nums = re.findall(r'\d+', str(text))
-    return int(nums[0]) if nums else 0
+{matrix}
+
+提醒：昨天未打卡100%的小朋友尽快补上~，完成百分百💯的小朋友很棒哦[加油][加油][加油]学习要趁早，打卡不能少
+
+--------------------
+{stats}"""
 
 def auto_login(username, password):
-    login_url = "https://v2.ireadabc.com/api/login"
-    payload = {"phone": str(username).strip(), "password": str(password).strip()}
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-        "Content-Type": "application/json;charset=UTF-8"
-    }
+    url = "https://iread.e-plan.cn/api/v1/user/login"
+    payload = {"username": username, "password": password}
+    headers = {"Content-Type": "application/json"}
     try:
-        resp = requests.post(login_url, json=payload, headers=headers, timeout=15)
-        if resp.status_code == 200:
-            data = resp.json().get("data", {})
-            if isinstance(data, dict) and data.get("token"):
-                return data.get("token"), None
-            return None, resp.json().get("message") or "未获取到 Token"
-        return None, f"登录异常({resp.status_code})"
-    except Exception as e:
-        return None, str(e)
-
-def process_student_data(class_name, name, listen, anim, books, req_listen, req_anim, req_books, name_map_str):
-    listen = clean_num(listen)
-    anim = clean_num(anim)
-    books = clean_num(books)
-    
-    clean_name = re.sub(r'[a-zA-Z\s]', '', name)
-    class_mapping = parse_name_map(name_map_str)
-    eng_name = class_mapping.get(clean_name, class_mapping.get(name, name))
-    
-    if listen >= req_listen and anim >= req_anim and books >= req_books:
-        return "TOP", f"{eng_name} (听音{listen}min, 动画{anim}min, 绘本{books}本)"
-    
-    if listen == 0 and anim == 0 and books == 0:
-        return "ZERO", f"{eng_name}"
-    
-    missing = []
-    if listen < req_listen:
-        missing.append(f"听音{req_listen - listen}min")
-    if anim < req_anim:
-        missing.append(f"动画{req_anim - anim}min")
-    if books < req_books:
-        missing.append(f"绘本{req_books - books}本")
-        
-    return "MID", f"{eng_name}：已达标 (距离全勤还缺：{', '.join(missing)})"
-
-def fetch_data_via_api(auth_token, report_type, start_date, end_date, class_rules_config, name_maps_config, default_rule, template_str, mode="traditional", emoji_config=None):
-    if emoji_config is None:
-        emoji_config = {"full": "🍓", "part": "✅", "zero": "🚫", "badge": "✔️"}
-
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-        "Token": auth_token.strip(),
-        "Client-Type": "BROWSER"
-    }
-    reports_dict = {}
-
-    try:
-        classes_url = "https://v2.ireadabc.com/api/teacher/classes/page/all" 
-        resp = requests.get(classes_url, headers=headers, timeout=15)
-        if resp.status_code != 200:
-            return None, f"Token 失效或服务器错误 ({resp.status_code})"
-            
-        raw_data = resp.json().get("data", [])
-        classes_data = raw_data.get("rows", []) if isinstance(raw_data, dict) else raw_data
-
-        # 📅 矩阵日历模式（按本周实际发生天数截断）
-        if mode == "matrix":
-            today = date.today()
-            d_start = today - timedelta(days=today.weekday()) # 本周一
-            
-            # 动态计算：从周一统计到今天（最多 7 天）
-            days_to_fetch = min(7, (today - d_start).days + 1)
-            d_end = d_start + timedelta(days=days_to_fetch - 1)
-            
-            date_title = f"{d_start.month}.{d_start.day}--{d_end.month}.{d_end.day}"
-
-            for item in classes_data:
-                class_id = str(item.get("class_id") or item.get("id"))
-                class_name = item.get("class_name") or item.get("name") or f"班级_{class_id}"
-                
-                base_rule = next((class_rules_config[k] for k in class_rules_config if k in class_name or class_name in k), default_rule)
-                matched_map = next((name_maps_config[k] for k in name_maps_config if k in class_name or class_name in k), "")
-                class_mapping = parse_name_map(matched_map)
-
-                student_matrix = {}
-
-                # 遍历从周一到今天的实际天数
-                for day_idx in range(days_to_fetch):
-                    curr_date = (d_start + timedelta(days=day_idx)).strftime("%Y-%m-%d")
-                    stats_url = f"https://v2.ireadabc.com/api/v3/reports/statistics/class/{class_id}"
-                    stat_resp = requests.get(stats_url, headers=headers, params={"start": curr_date, "end": curr_date}, timeout=15)
-
-                    if stat_resp.status_code == 200:
-                        s_json = stat_resp.json()
-                        students_raw = s_json.get("data", []) if isinstance(s_json, dict) else s_json
-                        if isinstance(students_raw, dict):
-                            students_raw = students_raw.get("rows", []) or students_raw.get("students", [])
-
-                        for s in students_raw:
-                            raw_name = s.get("name") or s.get("student_name") or ""
-                            clean_n = re.sub(r'[a-zA-Z\s]', '', raw_name)
-                            eng_name = class_mapping.get(clean_n, class_mapping.get(raw_name, raw_name))
-
-                            if eng_name not in student_matrix:
-                                student_matrix[eng_name] = []
-
-                            listen = clean_num(s.get("listen") or s.get("audio_time") or 0)
-                            anim = clean_num(s.get("animation") or s.get("anim") or 0)
-                            books = clean_num(s.get("grading") or s.get("read") or 0)
-
-                            if listen >= base_rule["listen"] and anim >= base_rule["anim"] and books >= base_rule["books"]:
-                                emoji = emoji_config.get("full", "🍓")
-                            elif listen == 0 and anim == 0 and books == 0:
-                                emoji = emoji_config.get("zero", "🚫")
-                            else:
-                                emoji = emoji_config.get("part", "✅")
-                            
-                            student_matrix[eng_name].append(emoji)
-
-                matrix_lines = []
-                for s_name, emojis in student_matrix.items():
-                    line = f"{''.join(emojis)} {s_name}"
-                    
-                    # 只有统计满7天（到了周末）且全勤时才展示尾巴 Badge
-                    if days_to_fetch == 7 and emojis.count(emoji_config.get("full", "🍓")) == 7 and emoji_config.get("badge"):
-                        line += f" {emoji_config.get('badge')}"
-                    matrix_lines.append(line)
-
-                reports_dict[class_name] = template_str.format(
-                    class_name=class_name,
-                    date_title=date_title,
-                    matrix="\n".join(matrix_lines)
-                )
-
-            return reports_dict, None
-
-        # 📋 传统文字分组模式
-        days_count = 1
-        if report_type == "昨日汇报":
-            yest = date.today() - timedelta(days=1)
-            s_date = e_date = yest.strftime("%Y-%m-%d")
-            date_title = yest.strftime("%m月%d日")
-        elif report_type == "周汇报":
-            d_start = date.today() - timedelta(days=date.today().weekday())
-            d_end = date.today()
-            s_date, e_date = d_start.strftime("%Y-%m-%d"), d_end.strftime("%Y-%m-%d")
-            date_title = f"{s_date}至{e_date}"
-            days_count = (d_end - d_start).days + 1
-        elif report_type == "月汇报":
-            d_start = date.today().replace(day=1)
-            d_end = date.today()
-            s_date, e_date = d_start.strftime("%Y-%m-%d"), d_end.strftime("%Y-%m-%d")
-            date_title = f"{s_date}至{e_date}"
-            days_count = (d_end - d_start).days + 1
-        elif report_type == "自定义时间":
-            s_date, e_date = start_date.strftime("%Y-%m-%d"), end_date.strftime("%Y-%m-%d")
-            date_title = f"{s_date}至{e_date}" if s_date != e_date else start_date.strftime("%m月%d日")
-            days_count = max(1, (end_date - start_date).days + 1)
+        resp = requests.post(url, json=payload, headers=headers, timeout=10)
+        res_json = resp.json()
+        if res_json.get("code") == 200 or res_json.get("status") == "success":
+            token = res_json.get("data", {}).get("token") or res_json.get("token")
+            return token, None
         else:
-            yest = date.today() - timedelta(days=1)
-            s_date = e_date = yest.strftime("%Y-%m-%d")
-            date_title = yest.strftime("%m月%d日")
-
-        for item in classes_data:
-            class_id = str(item.get("class_id") or item.get("id"))
-            class_name = item.get("class_name") or item.get("name") or f"班级_{class_id}"
-            
-            stats_url = f"https://v2.ireadabc.com/api/v3/reports/statistics/class/{class_id}"
-            stat_resp = requests.get(stats_url, headers=headers, params={"start": s_date, "end": e_date}, timeout=15)
-
-            if stat_resp.status_code == 200:
-                s_json = stat_resp.json()
-                students_raw = s_json.get("data", []) if isinstance(s_json, dict) else s_json
-                if isinstance(students_raw, dict):
-                    students_raw = students_raw.get("rows", []) or students_raw.get("students", [])
-
-                students_data = [{
-                    "name": s.get("name") or s.get("student_name") or "",
-                    "listen": s.get("listen") or s.get("audio_time") or 0,
-                    "anim": s.get("animation") or s.get("anim") or 0,
-                    "books": s.get("grading") or s.get("read") or 0
-                } for s in students_raw]
-
-                base_rule = next((class_rules_config[k] for k in class_rules_config if k in class_name or class_name in k), default_rule)
-                matched_rule = {k: v * days_count for k, v in base_rule.items()}
-                matched_map = next((name_maps_config[k] for k in name_maps_config if k in class_name or class_name in k), "")
-
-                tops, mids, zeros = [], [], []
-                for student in students_data:
-                    status, text = process_student_data(
-                        class_name, student['name'], student['listen'], student['anim'], student['books'],
-                        matched_rule["listen"], matched_rule["anim"], matched_rule["books"], matched_map
-                    )
-                    if status == "TOP": tops.append(text)
-                    elif status == "MID": mids.append(text)
-                    else: zeros.append(text)
-
-                reports_dict[class_name] = template_str.format(
-                    class_name=class_name,
-                    date_title=date_title,
-                    tops="\n".join(tops) if tops else "（暂无）",
-                    mids="\n\n".join(mids) if mids else "（无）",
-                    zeros="\n\n".join(zeros) if zeros else "（无）"
-                )
-
-        return reports_dict, None
+            return None, res_json.get("msg", "登录失败，请检查账号密码")
     except Exception as e:
         return None, str(e)
+
+def fetch_data_via_api(token, report_type, start_date, end_date, class_rules, name_maps, default_rule, template_str, mode="traditional", emoji_config=None):
+    if mode == "matrix":
+        # 矩阵模式：固定获取本周一至今天
+        today = date.today()
+        s_date = today - timedelta(days=today.weekday())
+        e_date = today
+    else:
+        if report_type == "昨日汇报":
+            s_date = date.today() - timedelta(days=1)
+            e_date = s_date
+        elif report_type == "周汇报":
+            today = date.today()
+            s_date = today - timedelta(days=today.weekday())
+            e_date = today
+        elif report_type == "月汇报":
+            today = date.today()
+            s_date = today.replace(day=1)
+            e_date = today
+        else:
+            s_date, e_date = start_date, end_date
+
+    url = f"https://iread.e-plan.cn/api/v1/teacher/student-study-records?start_date={s_date}&end_date={e_date}"
+    headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+    
+    try:
+        resp = requests.get(url, headers=headers, timeout=15)
+        if resp.status_code != 200:
+            return None, f"接口请求失败，状态码：{resp.status_code}"
+        
+        res_json = resp.json()
+        raw_data = res_json.get("data", [])
+        
+        if not raw_data:
+            return None, "暂未查询到该时间段内的学生打卡数据"
+
+        # 解析英文名映射表
+        parsed_maps = {}
+        for c_name, map_str in name_maps.items():
+            parsed_maps[c_name] = {}
+            if map_str:
+                for line in map_str.split("\n"):
+                    if ":" in line or "：" in line:
+                        line_clean = line.replace("：", ":")
+                        parts = line_clean.split(":")
+                        if len(parts) == 2:
+                            parsed_maps[c_name][parts[0].strip()] = parts[1].strip()
+
+        # 按班级归类数据
+        grouped_data = {}
+        for item in raw_data:
+            c_name = item.get("className", "默认班级")
+            if class_rules and c_name not in class_rules:
+                continue
+            if c_name not in grouped_data:
+                grouped_data[c_name] = []
+            grouped_data[c_name].append(item)
+
+        if not grouped_data:
+            return None, "未找到已配置班级的打卡数据，请确认班级名称是否一致"
+
+        reports = {}
+        
+        if mode == "matrix":
+            # 计算天数列表 (周一至今天)
+            days_count = (e_date - s_date).days + 1
+            date_title = f"{s_date.month}.{s_date.day}--{e_date.month}.{e_date.day}"
+            
+            e_full = emoji_config.get("full", "⭐") if emoji_config else "⭐"
+            e_part = emoji_config.get("part", "✨") if emoji_config else "✨"
+            e_zero = emoji_config.get("zero", "⚪") if emoji_config else "⚪"
+            e_badge = emoji_config.get("badge", "👑") if emoji_config else "👑"
+
+            for c_name, students in grouped_data.items():
+                rule = class_rules.get(c_name, default_rule)
+                t_listen = rule.get("listen", 60)
+                t_anim = rule.get("anim", 15)
+                t_books = rule.get("books", 2)
+                
+                c_map = parsed_maps.get(c_name, {})
+                matrix_lines = []
+
+                for stu in students:
+                    zh_name = stu.get("studentName", "")
+                    en_name = c_map.get(zh_name, "")
+                    display_name = f"{zh_name}{en_name}"
+                    
+                    records = stu.get("records", [])
+                    daily_emojis = []
+                    full_days = 0
+
+                    for i in range(days_count):
+                        day_dt = s_date + timedelta(days=i)
+                        day_str = day_dt.strftime("%Y-%m-%d")
+                        
+                        # 查找当日数据
+                        rec = next((r for r in records if r.get("date") == day_str), None)
+                        if rec:
+                            l_time = rec.get("listenTime", 0)
+                            a_time = rec.get("animTime", 0)
+                            b_cnt = rec.get("booksCount", 0)
+                            
+                            is_listen = l_time >= t_listen
+                            is_anim = a_time >= t_anim
+                            is_books = b_cnt >= t_books
+                            
+                            if is_listen and is_anim and is_books:
+                                daily_emojis.append(e_full)
+                                full_days += 1
+                            elif (l_time > 0 or a_time > 0 or b_cnt > 0):
+                                daily_emojis.append(e_part)
+                            else:
+                                daily_emojis.append(e_zero)
+                        else:
+                            daily_emojis.append(e_zero)
+
+                    # 满勤追加后缀标记
+                    emoji_str = " ".join(daily_emojis)
+                    if full_days == days_count and days_count > 0 and e_badge:
+                        emoji_str += f" {e_badge}"
+
+                    matrix_lines.append(f"{emoji_str}  {display_name}")
+
+                matrix_text = "\n".join(matrix_lines)
+                
+                # 填充模板（{stats} 在 app.py 中动态计算替换）
+                report_content = template_str.format(
+                    date_title=date_title,
+                    matrix=matrix_text,
+                    stats="{stats}"
+                )
+                reports[c_name] = report_content
+
+        else:
+            # 传统分组文字汇总模式
+            days_count = max(1, (e_date - s_date).days + 1)
+            date_title = f"{s_date.month}月{s_date.day}日" if s_date == e_date else f"{s_date.month}.{s_date.day}-{e_date.month}.{e_date.day}"
+
+            for c_name, students in grouped_data.items():
+                rule = class_rules.get(c_name, default_rule)
+                t_listen = rule.get("listen", 60) * days_count
+                t_anim = rule.get("anim", 15) * days_count
+                t_books = rule.get("books", 2) * days_count
+
+                c_map = parsed_maps.get(c_name, {})
+                both, listen_only, anim_only, books, none = [], [], [], [], []
+
+                for stu in students:
+                    zh_name = stu.get("studentName", "")
+                    en_name = c_map.get(zh_name, "")
+                    display_name = f"{zh_name}({en_name})" if en_name else zh_name
+
+                    l_time = stu.get("totalListenTime", 0)
+                    a_time = stu.get("totalAnimTime", 0)
+                    b_cnt = stu.get("totalBooksCount", 0)
+
+                    is_listen = l_time >= t_listen
+                    is_anim = a_time >= t_anim
+                    is_books = b_cnt >= t_books
+
+                    if is_listen and is_anim:
+                        both.append(display_name)
+                    elif is_listen:
+                        listen_only.append(display_name)
+                    elif is_anim:
+                        anim_only.append(display_name)
+                    else:
+                        none.append(display_name)
+
+                    if is_books:
+                        books.append(display_name)
+
+                report_content = template_str.format(
+                    class_name=c_name,
+                    report_type=report_type,
+                    date_title=date_title,
+                    target_listen=rule.get("listen", 60),
+                    target_anim=rule.get("anim", 15),
+                    target_books=rule.get("books", 2),
+                    both_count=len(both),
+                    both_list="、".join(both) if both else "无",
+                    listen_only_count=len(listen_only),
+                    listen_only_list="、".join(listen_only) if listen_only else "无",
+                    anim_only_count=len(anim_only),
+                    anim_only_list="、".join(anim_only) if anim_only else "无",
+                    books_count=len(books),
+                    books_list="、".join(books) if books else "无",
+                    none_count=len(none),
+                    none_list="、".join(none) if none else "无"
+                )
+                reports[c_name] = report_content
+
+        return reports, None
+
+    except Exception as e:
+        return None, f"数据处理发生异常：{str(e)}"
