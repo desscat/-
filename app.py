@@ -1,5 +1,6 @@
 import json
 import streamlit as st
+import streamlit.components.v1 as components
 from datetime import date, timedelta
 from iread_core import auto_login, fetch_data_via_api, DEFAULT_TEMPLATE, DEFAULT_MATRIX_TEMPLATE
 
@@ -7,14 +8,14 @@ from iread_core import auto_login, fetch_data_via_api, DEFAULT_TEMPLATE, DEFAULT
 if "btn_clicked" not in st.session_state:
     st.session_state.btn_clicked = False
 
-# 💡 关键修改点 1：根据是否点击了生成按钮，动态控制侧边栏是展开还是自动折叠
+# 根据是否点击了生成按钮，动态控制侧边栏是展开还是自动折叠
 sidebar_state = "collapsed" if st.session_state.btn_clicked else "expanded"
 
 st.set_page_config(
     page_title="全阅读学情打卡生成器", 
     page_icon="⚡", 
     layout="wide",
-    initial_sidebar_state=sidebar_state # 设为 collapsed 即可自动收起侧边栏
+    initial_sidebar_state=sidebar_state
 )
 
 st.title("⚡ 全阅读学情打卡生成器")
@@ -175,7 +176,7 @@ with st.sidebar:
 
     if btn_generate:
         st.session_state.btn_clicked = True
-        st.rerun() # 触发重新渲染，应用自动收起侧边栏状态
+        st.rerun()
 
 # ==================== 3. 主界面展示区 ====================
 if st.session_state.btn_clicked:
@@ -208,11 +209,86 @@ if st.session_state.btn_clicked:
             if err:
                 st.error(f"❌ 错误：{err}")
             elif reports:
-                st.toast("🎉 打卡报告生成完毕！点击框内右上角即可一键复制！", icon="✅")
-                for c_name, c_content in reports.items():
+                st.toast("🎉 打卡报告生成成功！点击下方红按钮即可复制！", icon="✅")
+                
+                for idx, (c_name, c_content) in enumerate(reports.items()):
                     st.markdown(f"### 📍 {c_name} 打卡报告")
                     
-                    # 💡 关键修改点 2：使用 st.code 生成文本框，右上角自带官方【一键复制】图标，点击后浏览器会自动弹框提示已复制
-                    st.code(c_content, language=None)
+                    # 对文本中的特殊字符进行转义，避免 JavaScript 语法错误
+                    escaped_content = (
+                        c_content.replace("\\", "\\\\")
+                        .replace("`", "\\`")
+                        .replace("${", "\\${")
+                    )
+                    
+                    # 构建带可视化点击反馈的 HTML/JS 复制框
+                    custom_copy_card = f"""
+                    <div style="background-color: #f8f9fa; border: 1px solid #e9ecef; border-radius: 8px; padding: 16px; font-family: monospace; position: relative;">
+                        <button id="copy-btn-{idx}" onclick="copyText_{idx}()" style="
+                            position: absolute;
+                            top: 10px;
+                            right: 10px;
+                            background-color: #ff4b4b;
+                            color: white;
+                            border: none;
+                            padding: 6px 14px;
+                            border-radius: 6px;
+                            cursor: pointer;
+                            font-size: 13px;
+                            font-weight: bold;
+                            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+                            transition: all 0.2s ease;
+                        ">📋 复制本班报告</button>
+                        
+                        <pre style="margin: 0; white-space: pre-wrap; word-break: break-word; font-size: 14px; line-height: 1.6; color: #31333f;">{c_content}</pre>
+                    </div>
+
+                    <script>
+                    function copyText_{idx}() {{
+                        const text = `{escaped_content}`;
+                        const btn = document.getElementById('copy-btn-{idx}');
+                        
+                        function showSuccess() {{
+                            btn.innerText = "✅ 复制成功！";
+                            btn.style.backgroundColor = "#28a745";
+                            setTimeout(() => {{
+                                btn.innerText = "📋 复制本班报告";
+                                btn.style.backgroundColor = "#ff4b4b";
+                            }}, 2000);
+                        }}
+
+                        if (navigator.clipboard && window.isSecureContext) {{
+                            navigator.clipboard.writeText(text).then(showSuccess).catch(err => {{
+                                fallbackCopy(text, showSuccess);
+                            }});
+                        }} else {{
+                            fallbackCopy(text, showSuccess);
+                        }}
+                    }}
+
+                    function fallbackCopy(text, callback) {{
+                        const textArea = document.createElement("textarea");
+                        textArea.value = text;
+                        textArea.style.position = "fixed";
+                        textArea.style.left = "-999999px";
+                        document.body.appendChild(textArea);
+                        textArea.focus();
+                        textArea.select();
+                        try {{
+                            document.execCommand('copy');
+                            callback();
+                        }} catch (err) {{
+                            alert('复制失败，请手动选择框内文字复制');
+                        }}
+                        document.body.removeChild(textArea);
+                    }}
+                    </script>
+                    """
+                    
+                    # 根据文字行数自适应调整框高度
+                    line_count = len(c_content.split('\n'))
+                    card_height = max(180, line_count * 24 + 60)
+                    
+                    components.html(custom_copy_card, height=card_height)
 else:
     st.info("👈 请在左侧边栏配置班级与规则，点击 **「⚡ 一键生成打卡报告」** 即可。")
