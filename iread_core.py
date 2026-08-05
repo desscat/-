@@ -1,73 +1,106 @@
 import requests
-import json
-from datetime import datetime, timedelta
+from datetime import date, timedelta
 
-# 各班级考核标准配置（可根据实际情况修改）
+# 默认班级规则配置（按需修改）
 CLASS_RULES_CONFIG = {
     "你的班级名称1": {"listen": 60, "anim": 15, "books": 2},
     "你的班级名称2": {"listen": 40, "anim": 15, "books": 2},
 }
 
-def login_iread(username, password):
-    """登录全阅读获取 Token"""
-    url = "https://api.iread.com/v1/user/login"
-    payload = {"username": username, "password": password}
-    try:
-        response = requests.post(url, json=payload, timeout=10)
-        res_data = response.json()
-        if res_data.get("code") == 200 or "token" in res_data:
-            return res_data.get("data", {}).get("token") or res_data.get("token")
-    except Exception as e:
-        print(f"登录异常: {e}")
-    return None
+DEFAULT_TEMPLATE = """[以下为{date_title}的打卡情况]
 
-def fetch_class_data(token, class_id, start_date, end_date):
-    """获取指定班级的打卡数据"""
-    url = f"https://api.iread.com/v1/teacher/stats?class_id={class_id}&start={start_date}&end={end_date}"
-    headers = {"Authorization": f"Bearer {token}"}
-    try:
-        response = requests.get(url, headers=headers, timeout=10)
-        return response.json().get("data", [])
-    except Exception as e:
-        print(f"获取班级数据失败: {e}")
-        return []
+🏆 {class_name}
 
-def send_pushplus(token, title, content):
-    """通过 PushPlus 发送微信通知"""
-    url = "http://www.pushplus.plus/send"
-    data = {
-        "token": token,
-        "title": title,
-        "content": content,
-        "template": "markdown"
+🌟【今日光荣榜】
+{tops}
+
+💪【再努努力】
+{mids}
+
+⏰【该起床打卡啦】
+{zeros}"""
+
+def auto_login(username, password):
+    """登录全阅读获取真实 Token"""
+    login_url = "https://v2.ireadabc.com/api/login"
+    payload = {"phone": str(username).strip(), "password": str(password).strip()}
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+        "Content-Type": "application/json;charset=UTF-8"
     }
     try:
-        response = requests.post(url, json=data, timeout=10)
-        return response.json()
+        resp = requests.post(login_url, json=payload, headers=headers, timeout=15)
+        if resp.status_code == 200:
+            data = resp.json().get("data", {})
+            if isinstance(data, dict) and data.get("token"):
+                return data.get("token"), None
+            return None, resp.json().get("message") or "未获取到Token"
+        return None, f"登录 HTTP 状态码: {resp.status_code}"
     except Exception as e:
-        print(f"PushPlus 发送失败: {e}")
-        return None
+        return None, str(e)
 
-def run_automation(username, password, pushplus_token, target_date=None):
-    """执行自动化统计与推送的核心函数"""
-    if not target_date:
-        target_date = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
-    
-    token = login_iread(username, password)
-    if not token:
-        if pushplus_token:
-            send_pushplus(pushplus_token, "⚠️ 全阅读打卡提醒报错", f"账号 {username} 登录失败，请检查账号密码。")
-        return "登录失败，请检查凭证"
+def fetch_data_via_api(auth_token, report_type, class_rules_config):
+    """获取打卡数据并生成文本报告"""
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+        "Token": auth_token.strip(),
+        "Client-Type": "BROWSER"
+    }
+    reports_dict = {}
 
-    report_content = f"# 📊 每日打卡统计报告\n**统计日期：** {target_date}\n\n"
-    
-    for class_name, rules in CLASS_RULES_CONFIG.items():
-        report_content += f"### 🏫 班级：{class_name}\n"
-        report_content += f"- 听力标准：{rules['listen']}分钟\n"
-        report_content += f"- 动画标准：{rules['anim']}分钟\n"
-        report_content += f"- 阅读标准：{rules['books']}本\n\n---\n"
+    try:
+        # 1. 获取班级列表
+        classes_url = "https://v2.ireadabc.com/api/teacher/classes/page/all" 
+        resp = requests.get(classes_url, headers=headers, timeout=15)
+        if resp.status_code != 200:
+            return None, f"获取班级失败 ({resp.status_code})"
+            
+        classes_data = resp.json().get("data", [])
+        if isinstance(classes_data, dict):
+            classes_data = classes_data.get("rows", []) or classes_data.get("list", [])
 
-    if pushplus_token:
-        send_pushplus(pushplus_token, f"【打卡日报】{target_date}", report_content)
-    
-    return "运行成功并已推送"
+        # 2. 时间计算
+        yest = date.today() - timedelta(days=1)
+        s_date = e_date = yest.strftime("%Y-%m-%d")
+        date_title = yest.strftime("%m月%d日")
+
+        # 3. 遍历班级抓取打卡
+        for item in classes_data:
+            class_id = str(item.get("class_id") or item.get("id"))
+            class_name = item.get("class_name") or item.get("name") or f"班级_{class_id}"
+            
+            stats_url = f"https://v2.ireadabc.com/api/v3/reports/statistics/class/{class_id}"
+            stat_resp = requests.get(stats_url, headers=headers, params={"start": s_date, "end": e_date}, timeout=15)
+
+            if stat_resp.status_code == 200:
+                students_raw = stat_resp.json().get("data", [])
+                if isinstance(students_raw, dict):
+                    students_raw = students_raw.get("rows", []) or students_raw.get("students", [])
+
+                rule = class_rules_config.get(class_name, {"listen": 60, "anim": 15, "books": 2})
+                
+                tops, mids, zeros = [], [], []
+                for s in students_raw:
+                    name = s.get("name") or s.get("student_name") or "无名"
+                    listen = int(s.get("listen") or s.get("audio_time") or 0)
+                    anim = int(s.get("animation") or s.get("anim") or 0)
+                    books = int(s.get("grading") or s.get("read") or 0)
+
+                    if listen >= rule["listen"] and anim >= rule["anim"] and books >= rule["books"]:
+                        tops.append(f"{name} (听音{listen}分, 动画{anim}分, 绘本{books}本)")
+                    elif listen == 0 and anim == 0 and books == 0:
+                        zeros.append(f"{name}")
+                    else:
+                        mids.append(f"{name} (听音{listen}/{rule['listen']}分, 动画{anim}/{rule['anim']}分, 绘本{books}/{rule['books']}本)")
+
+                reports_dict[class_name] = DEFAULT_TEMPLATE.format(
+                    class_name=class_name,
+                    date_title=date_title,
+                    tops="\n".join(tops) if tops else "（无）",
+                    mids="\n".join(mids) if mids else "（无）",
+                    zeros="\n".join(zeros) if zeros else "（无）"
+                )
+
+        return reports_dict, None
+    except Exception as e:
+        return None, str(e)
