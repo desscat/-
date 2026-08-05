@@ -32,7 +32,8 @@ DEFAULT_MATRIX_TEMPLATE = """❤️ {date_title} 全阅读打卡 ❤️
 {stats}"""
 
 def auto_login(username, password):
-    url = "https://iread.e-plan.cn/api/v1/user/login"
+    # 已更新域名至 v2.ireadabc.com
+    url = "https://v2.ireadabc.com/api/v1/user/login"
     payload = {"username": username, "password": password}
     headers = {"Content-Type": "application/json"}
     try:
@@ -44,7 +45,7 @@ def auto_login(username, password):
         else:
             return None, res_json.get("msg", "登录失败，请检查账号密码")
     except Exception as e:
-        return None, str(e)
+        return None, f"登录失败：{str(e)}"
 
 def fetch_data_via_api(token, report_type, start_date, end_date, class_rules, name_maps, default_rule, template_str, mode="traditional", emoji_config=None):
     if mode == "matrix":
@@ -67,7 +68,8 @@ def fetch_data_via_api(token, report_type, start_date, end_date, class_rules, na
         else:
             s_date, e_date = start_date, end_date
 
-    url = f"https://iread.e-plan.cn/api/v1/teacher/student-study-records?start_date={s_date}&end_date={e_date}"
+    # 已更新域名至 v2.ireadabc.com
+    url = f"https://v2.ireadabc.com/api/v1/teacher/student-study-records?start_date={s_date}&end_date={e_date}"
     headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
     
     try:
@@ -109,7 +111,6 @@ def fetch_data_via_api(token, report_type, start_date, end_date, class_rules, na
         reports = {}
         
         if mode == "matrix":
-            # 计算天数列表 (周一至今天)
             days_count = (e_date - s_date).days + 1
             date_title = f"{s_date.month}.{s_date.day}--{e_date.month}.{e_date.day}"
             
@@ -140,7 +141,6 @@ def fetch_data_via_api(token, report_type, start_date, end_date, class_rules, na
                         day_dt = s_date + timedelta(days=i)
                         day_str = day_dt.strftime("%Y-%m-%d")
                         
-                        # 查找当日数据
                         rec = next((r for r in records if r.get("date") == day_str), None)
                         if rec:
                             l_time = rec.get("listenTime", 0)
@@ -161,7 +161,6 @@ def fetch_data_via_api(token, report_type, start_date, end_date, class_rules, na
                         else:
                             daily_emojis.append(e_zero)
 
-                    # 满勤追加后缀标记
                     emoji_str = " ".join(daily_emojis)
                     if full_days == days_count and days_count > 0 and e_badge:
                         emoji_str += f" {e_badge}"
@@ -170,7 +169,6 @@ def fetch_data_via_api(token, report_type, start_date, end_date, class_rules, na
 
                 matrix_text = "\n".join(matrix_lines)
                 
-                # 填充模板（{stats} 在 app.py 中动态计算替换）
                 report_content = template_str.format(
                     date_title=date_title,
                     matrix=matrix_text,
@@ -179,7 +177,6 @@ def fetch_data_via_api(token, report_type, start_date, end_date, class_rules, na
                 reports[c_name] = report_content
 
         else:
-            # 传统分组文字汇总模式
             days_count = max(1, (e_date - s_date).days + 1)
             date_title = f"{s_date.month}月{s_date.day}日" if s_date == e_date else f"{s_date.month}.{s_date.day}-{e_date.month}.{e_date.day}"
 
