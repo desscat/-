@@ -26,10 +26,13 @@ DEFAULT_MATRIX_TEMPLATE = """❤️ {date_title} 全阅读打卡 ❤️
 
 {matrix}
 
-提醒：昨天未打卡100%的小朋友尽快补上~，完成百分百💯的小朋友很棒哦[加油][加油][加油]学习要趁早，打卡不能少
-
 --------------------
-{stats}"""
+📊 【学情统计】
+• 班级总人数：{total_students} 人
+• 全勤全达标（皇冠👑）：{full_attendance_count} 人
+• 本阶段打卡率：{attendance_rate}%
+
+💡 提醒：昨天未打卡100%的小朋友尽快补上~，完成百分百💯的小朋友很棒哦[加油][加油][加油]学习要趁早，打卡不能少"""
 
 def parse_name_map(map_str):
     mapping = {}
@@ -47,6 +50,18 @@ def clean_num(text):
         return 0
     nums = re.findall(r'\d+', str(text))
     return int(nums[0]) if nums else 0
+
+def format_student_name(raw_name, eng_name):
+    if not raw_name:
+        return ""
+    raw_name = str(raw_name).strip()
+    if not eng_name:
+        return raw_name
+    eng_name = str(eng_name).strip()
+    # 如果原名字里已经包含了该英文名，则直接返回原名字，避免重复
+    if eng_name.lower() in raw_name.lower():
+        return raw_name
+    return f"{raw_name}({eng_name})"
 
 def auto_login(username, password):
     login_url = "https://v2.ireadabc.com/api/login"
@@ -74,14 +89,12 @@ def fetch_data_via_api(auth_token, report_type, start_date, end_date, class_rule
 
     clean_token = auth_token.strip()
     
-    # 锁定正确的请求头格式：使用截图中的 Token 字段
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36",
         "Token": clean_token,
         "Client-Type": "BROWSER"
     }
 
-    # 锁定正确的班级列表接口
     classes_url = "https://v2.ireadabc.com/api/teacher/classes/page/all"
     
     try:
@@ -92,7 +105,6 @@ def fetch_data_via_api(auth_token, report_type, start_date, end_date, class_rule
         res_json = resp.json()
         raw_data = res_json.get("data", [])
         
-        # 兼容处理返回的字典或列表结构
         classes_data = []
         if isinstance(raw_data, dict):
             classes_data = raw_data.get("rows", []) or raw_data.get("list", []) or raw_data.get("classes", [])
@@ -148,8 +160,8 @@ def fetch_data_via_api(auth_token, report_type, start_date, end_date, class_rule
                             if not raw_name:
                                 continue
                             clean_n = re.sub(r'[a-zA-Z\s]', '', raw_name)
-                            eng_name = class_mapping.get(clean_n, class_mapping.get(raw_name, raw_name))
-                            display_name = f"{raw_name}{eng_name}" if not eng_name or eng_name == raw_name else f"{raw_name}({eng_name})"
+                            eng_name = class_mapping.get(clean_n, class_mapping.get(raw_name, ""))
+                            display_name = format_student_name(raw_name, eng_name)
 
                             if display_name not in all_days_students_map:
                                 all_days_students_map[display_name] = []
@@ -168,19 +180,33 @@ def fetch_data_via_api(auth_token, report_type, start_date, end_date, class_rule
                             all_days_students_map[display_name].append(emoji)
 
                 matrix_lines = []
+                total_students = len(all_days_students_map)
+                full_attendance_count = 0
+
                 for s_name, emojis in all_days_students_map.items():
                     while len(emojis) < days_to_fetch:
                         emojis.append(emoji_config.get("zero", "🚫"))
                         
                     line = f"{''.join(emojis)}  {s_name}"
-                    if days_to_fetch > 0 and emojis.count(emoji_config.get("full", "🍓")) == days_to_fetch and emoji_config.get("badge"):
-                        line += f" {emoji_config.get('badge')}"
+                    full_count_in_row = emojis.count(emoji_config.get("full", "🍓"))
+                    
+                    if days_to_fetch > 0 and full_count_in_row == days_to_fetch:
+                        full_attendance_count += 1
+                        if emoji_config.get("badge"):
+                            line += f" {emoji_config.get('badge')}"
                     matrix_lines.append(line)
+
+                attendance_rate = round((full_attendance_count / total_students * 100), 1) if total_students > 0 else 0.0
+
+                stats_str = f"• 班级总人数：{total_students} 人\n• 全勤全达标：{full_attendance_count} 人\n• 本阶段全勤率：{attendance_rate}%"
 
                 reports_dict[class_name] = template_str.format(
                     date_title=date_title,
                     matrix="\n".join(matrix_lines) if matrix_lines else "（暂无打卡数据）",
-                    stats=""
+                    total_students=total_students,
+                    full_attendance_count=full_attendance_count,
+                    attendance_rate=attendance_rate,
+                    stats=stats_str
                 )
 
             return reports_dict, None
@@ -248,7 +274,7 @@ def fetch_data_via_api(auth_token, report_type, start_date, end_date, class_rule
                         continue
                     clean_n = re.sub(r'[a-zA-Z\s]', '', raw_name)
                     eng_name = class_mapping.get(clean_n, class_mapping.get(raw_name, ""))
-                    display_name = f"{raw_name}({eng_name})" if eng_name else raw_name
+                    display_name = format_student_name(raw_name, eng_name)
 
                     listen = clean_num(student["listen"])
                     anim = clean_num(student["anim"])
