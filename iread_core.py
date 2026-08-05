@@ -32,20 +32,40 @@ DEFAULT_MATRIX_TEMPLATE = """❤️ {date_title} 全阅读打卡 ❤️
 {stats}"""
 
 def auto_login(username, password):
-    # 已更新域名至 v2.ireadabc.com
-    url = "https://v2.ireadabc.com/api/v1/user/login"
+    # 已根据抓包更新为最新的登录接口地址
+    url = "https://v2.ireadabc.com/api/login"
     payload = {"username": username, "password": password}
-    headers = {"Content-Type": "application/json"}
+    headers = {
+        "Content-Type": "application/json",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+    }
     try:
         resp = requests.post(url, json=payload, headers=headers, timeout=10)
-        res_json = resp.json()
-        if res_json.get("code") == 200 or res_json.get("status") == "success":
-            token = res_json.get("data", {}).get("token") or res_json.get("token")
+        
+        if resp.status_code != 200:
+            return None, f"登录接口响应异常 (HTTP {resp.status_code})"
+            
+        try:
+            res_json = resp.json()
+        except Exception:
+            return None, f"服务器未返回 JSON 数据，响应预览：{resp.text[:100]}"
+
+        # 校验返回数据中的 token
+        token = None
+        if isinstance(res_json, dict):
+            if "data" in res_json and isinstance(res_json["data"], dict):
+                token = res_json["data"].get("token")
+            if not token:
+                token = res_json.get("token")
+
+        if token:
             return token, None
         else:
-            return None, res_json.get("msg", "登录失败，请检查账号密码")
+            msg = res_json.get("msg") or res_json.get("message") or "登录失败，未获取到有效 Token"
+            return None, msg
+
     except Exception as e:
-        return None, f"登录失败：{str(e)}"
+        return None, f"登录请求发生异常：{str(e)}"
 
 def fetch_data_via_api(token, report_type, start_date, end_date, class_rules, name_maps, default_rule, template_str, mode="traditional", emoji_config=None):
     if mode == "matrix":
@@ -68,14 +88,18 @@ def fetch_data_via_api(token, report_type, start_date, end_date, class_rules, na
         else:
             s_date, e_date = start_date, end_date
 
-    # 已更新域名至 v2.ireadabc.com
-    url = f"https://v2.ireadabc.com/api/v1/teacher/student-study-records?start_date={s_date}&end_date={e_date}"
-    headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+    # 已更新域名与路径
+    url = f"https://v2.ireadabc.com/api/student-study-records?start_date={s_date}&end_date={e_date}"
+    headers = {
+        "Authorization": f"Bearer {token}", 
+        "Content-Type": "application/json",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+    }
     
     try:
         resp = requests.get(url, headers=headers, timeout=15)
         if resp.status_code != 200:
-            return None, f"接口请求失败，状态码：{resp.status_code}"
+            return None, f"数据接口请求失败，状态码：{resp.status_code}"
         
         res_json = resp.json()
         raw_data = res_json.get("data", [])
