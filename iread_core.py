@@ -34,7 +34,7 @@ DEFAULT_MATRIX_TEMPLATE = """❤️ {date_title} 全阅读打卡 ❤️
 
 {stats}
 
-💡 提醒：昨天未打卡100%的小朋友尽快补上~，完成百分百💯的小朋友很棒哦[加油][加油][加油]学习要趁早，打卡不能少"""
+"""
 
 def parse_name_map(map_str):
     mapping = {}
