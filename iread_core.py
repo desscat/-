@@ -60,7 +60,6 @@ def format_student_name(raw_name, eng_name):
     if not eng_name:
         return raw_name
     eng_name = str(eng_name).strip()
-    # 如果原名字里已经包含了该英文名，则直接返回原名字，避免重复
     if eng_name.lower() in raw_name.lower():
         return raw_name
     return f"{raw_name}({eng_name})"
