@@ -55,7 +55,9 @@ with st.sidebar:
     st.header("⚙️ 参数配置")
     
     if st.button("🧹 清空/重置所有配置", type="secondary", use_container_width=True):
+        # 清空 URL
         st.query_params.clear()
+        # 清空 Session 状态
         st.session_state.token = ""
         st.session_state.class_rules = {}
         st.session_state.name_maps = {}
@@ -101,19 +103,27 @@ with st.sidebar:
                 e_zero = st.text_input("未打卡", value=st.session_state.emojis.get("zero", "🚫"))
                 e_badge = st.text_input("满勤尾巴标记", value=st.session_state.emojis.get("badge", "✔️"))
             
-            st.session_state.emojis = {"full": e_full, "part": e_part, "zero": e_zero, "badge": e_badge}
+            # 修复点 1：只在 Emoji 确实改变时才存入 URL，防止清空后马上又写回
+            new_emojis = {"full": e_full, "part": e_part, "zero": e_zero, "badge": e_badge}
+            if new_emojis != st.session_state.emojis:
+                st.session_state.emojis = new_emojis
+                save_to_url()
             
             st.markdown("**自定义矩阵模板：**")
             mat_tmpl_input = st.text_area("矩阵模板", value=st.session_state.matrix_template, height=120)
+            
+            # 修复点 2：把 save_to_url() 放进判断分支内部
             if mat_tmpl_input != st.session_state.matrix_template:
                 st.session_state.matrix_template = mat_tmpl_input
-            save_to_url()
+                save_to_url()
         else:
             st.markdown("**自定义传统分组模板：**")
             custom_tmpl_input = st.text_area("文字模板", value=st.session_state.custom_template, height=180)
+            
+            # 修复点 3：把 save_to_url() 放进判断分支内部
             if custom_tmpl_input != st.session_state.custom_template:
                 st.session_state.custom_template = custom_tmpl_input
-            save_to_url()
+                save_to_url()
 
     st.subheader("4. ⚙️ 班级与映射管理")
     new_class_input = st.text_input("➕ 添加班级：", placeholder="例如：万达K12班")
