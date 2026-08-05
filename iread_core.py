@@ -23,7 +23,7 @@ DEFAULT_TEMPLATE = """📌 {class_name} {report_type}（{date_title}）
 --------------------
 💡 达标标准：每日听音 ≥ {target_listen}分钟，每日动画 ≥ {target_anim}分钟，绘本 ≥ {target_books}本。"""
 
-# 修复：移除了上方重复的学情统计文字，只保留矩阵与底部的 {stats} 占位符和提醒
+# 💡 代码内默认模板：已彻底删除了上方重复的简陋学情统计，只保留矩阵、底部 {stats} 以及温馨提示
 DEFAULT_MATRIX_TEMPLATE = """❤️ {date_title} 全阅读打卡 ❤️
 
 {matrix}
