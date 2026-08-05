@@ -99,10 +99,15 @@ def fetch_data_via_api(auth_token, report_type, start_date, end_date, class_rule
         raw_data = resp.json().get("data", [])
         classes_data = raw_data.get("rows", []) if isinstance(raw_data, dict) else raw_data
 
-        # 📅 矩阵日历模式
+        # 📅 矩阵日历模式（按本周实际发生天数截断）
         if mode == "matrix":
-            d_start = date.today() - timedelta(days=date.today().weekday())
-            d_end = d_start + timedelta(days=6)
+            today = date.today()
+            d_start = today - timedelta(days=today.weekday()) # 本周一
+            
+            # 动态计算：从周一统计到今天（最多 7 天）
+            days_to_fetch = min(7, (today - d_start).days + 1)
+            d_end = d_start + timedelta(days=days_to_fetch - 1)
+            
             date_title = f"{d_start.month}.{d_start.day}--{d_end.month}.{d_end.day}"
 
             for item in classes_data:
@@ -115,7 +120,8 @@ def fetch_data_via_api(auth_token, report_type, start_date, end_date, class_rule
 
                 student_matrix = {}
 
-                for day_idx in range(7):
+                # 遍历从周一到今天的实际天数
+                for day_idx in range(days_to_fetch):
                     curr_date = (d_start + timedelta(days=day_idx)).strftime("%Y-%m-%d")
                     stats_url = f"https://v2.ireadabc.com/api/v3/reports/statistics/class/{class_id}"
                     stat_resp = requests.get(stats_url, headers=headers, params={"start": curr_date, "end": curr_date}, timeout=15)
@@ -149,11 +155,10 @@ def fetch_data_via_api(auth_token, report_type, start_date, end_date, class_rule
 
                 matrix_lines = []
                 for s_name, emojis in student_matrix.items():
-                    while len(emojis) < 7:
-                        emojis.append(emoji_config.get("zero", "🚫"))
-                    
                     line = f"{''.join(emojis)} {s_name}"
-                    if emojis.count(emoji_config.get("full", "🍓")) == 7 and emoji_config.get("badge"):
+                    
+                    # 只有统计满7天（到了周末）且全勤时才展示尾巴 Badge
+                    if days_to_fetch == 7 and emojis.count(emoji_config.get("full", "🍓")) == 7 and emoji_config.get("badge"):
                         line += f" {emoji_config.get('badge')}"
                     matrix_lines.append(line)
 
@@ -165,7 +170,7 @@ def fetch_data_via_api(auth_token, report_type, start_date, end_date, class_rule
 
             return reports_dict, None
 
-        # 📋 传统模式
+        # 📋 传统文字分组模式
         days_count = 1
         if report_type == "昨日汇报":
             yest = date.today() - timedelta(days=1)
