@@ -1,5 +1,4 @@
 streamlit==1.38.0
-playwright
 pandas
 requests
-streamlit-local-storage
+playwright
