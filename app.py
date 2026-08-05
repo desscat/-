@@ -1,8 +1,11 @@
 import asyncio
 try:
-    asyncio.get_event_loop()
+    loop = asyncio.get_event_loop()
+    if loop.is_closed():
+        raise RuntimeError("Loop is closed")
 except RuntimeError:
-    asyncio.set_event_loop(asyncio.new_event_loop())
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
 
 import streamlit as st
 from datetime import datetime, timedelta
