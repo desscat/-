@@ -20,6 +20,15 @@ st.set_page_config(
 
 st.title("⚡ 全阅读学情打卡生成器")
 
+# ==================== 5. Emoji 主题包配置 ====================
+EMOJI_PRESETS = {
+    "自定义": None,
+    "🍓 水果派对": {"full": "🍓", "part": "✅", "zero": "🚫", "badge": "✔️"},
+    "🌟 星光闪耀": {"full": "⭐", "part": "✨", "zero": "⚪", "badge": "👑"},
+    "🚀 太空探索": {"full": "🚀", "part": "🛸", "zero": "🌑", "badge": "🌌"},
+    "🏆 勋章荣誉": {"full": "🏆", "part": "🥇", "zero": "❌", "badge": "🎖️"}
+}
+
 # ==================== 1. URL 持久化配置 ====================
 params = st.query_params
 url_token = params.get("token", "")
@@ -103,9 +112,15 @@ with st.sidebar:
             start_date = st.date_input("开始日期", value=date.today() - timedelta(days=1))
             end_date = st.date_input("结束日期", value=date.today())
 
-    st.subheader("3. 🎨 DIY 格式与 Emoji 自定义")
-    with st.expander("✨ 点击展开/修改模板与 Emoji", expanded=False):
+    st.subheader("3. 🎨 DIY 格式与 Emoji 主题")
+    with st.expander("✨ 点击展开/修改模板与 Emoji 主题", expanded=False):
         if output_mode == "🍓 矩阵式周打卡榜":
+            # 改进 5：快捷 Emoji 主题选择
+            selected_preset = st.selectbox("选择 Emoji 预设主题", list(EMOJI_PRESETS.keys()), index=1)
+            if selected_preset != "自定义" and EMOJI_PRESETS[selected_preset]:
+                st.session_state.emojis = EMOJI_PRESETS[selected_preset]
+                save_to_url()
+
             st.markdown("**自定义 Emoji 标记：**")
             col_e1, col_e2 = st.columns(2)
             with col_e1:
@@ -209,64 +224,98 @@ if st.session_state.btn_clicked:
             if err:
                 st.error(f"❌ 错误：{err}")
             elif reports:
-                st.toast("🎉 打卡报告生成成功！点击下方红按钮即可复制！", icon="✅")
+                st.toast("🎉 打卡报告生成成功！点击下方红按钮即可一键复制！", icon="✅")
                 
                 for idx, (c_name, c_content) in enumerate(reports.items()):
                     st.markdown(f"### 📍 {c_name} 打卡报告")
                     
-                    # 对文本中的特殊字符进行转义，避免 JavaScript 语法错误
+                    # 改进 4：班级学情数据指标统计卡片
+                    lines = c_content.split('\n')
+                    f_emoji = st.session_state.emojis.get("full", "🍓")
+                    p_emoji = st.session_state.emojis.get("part", "✅")
+                    z_emoji = st.session_state.emojis.get("zero", "🚫")
+                    
+                    full_cnt, part_cnt, zero_cnt = 0, 0, 0
+                    for line in lines:
+                        if f_emoji in line:
+                            full_cnt += 1
+                        elif p_emoji in line:
+                            part_cnt += 1
+                        elif z_emoji in line:
+                            zero_cnt += 1
+
+                    total_students = full_cnt + part_cnt + zero_cnt
+                    if total_students > 0:
+                        col1, col2, col3 = st.columns(3)
+                        col1.metric("🌟 全勤达标", f"{full_cnt} 人", f"{round(full_cnt/total_students*100)}% 占比")
+                        col2.metric("💪 持续加油", f"{part_cnt} 人")
+                        col3.metric("⚠️ 未打卡预警", f"{zero_cnt} 人", delta_color="inverse")
+                    
+                    # 对文本中的特殊字符进行转义
                     escaped_content = (
                         c_content.replace("\\", "\\\\")
                         .replace("`", "\\`")
                         .replace("${", "\\${")
                     )
                     
-                    # 构建带可视化点击反馈的 HTML/JS 复制框
+                    # 改进 1：增加原生 Web Share API 支持（手机端一键拉起微信/系统分享）
                     custom_copy_card = f"""
                     <div style="background-color: #f8f9fa; border: 1px solid #e9ecef; border-radius: 8px; padding: 16px; font-family: monospace; position: relative;">
-                        <button id="copy-btn-{idx}" onclick="copyText_{idx}()" style="
-                            position: absolute;
-                            top: 10px;
-                            right: 10px;
-                            background-color: #ff4b4b;
-                            color: white;
-                            border: none;
-                            padding: 6px 14px;
-                            border-radius: 6px;
-                            cursor: pointer;
-                            font-size: 13px;
-                            font-weight: bold;
-                            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-                            transition: all 0.2s ease;
-                        ">📋 复制本班报告</button>
+                        <div style="position: absolute; top: 10px; right: 10px; display: flex; gap: 8px;">
+                            <button id="share-btn-{idx}" onclick="shareText_{idx}()" style="
+                                background-color: #07c160;
+                                color: white;
+                                border: none;
+                                padding: 6px 12px;
+                                border-radius: 6px;
+                                cursor: pointer;
+                                font-size: 13px;
+                                font-weight: bold;
+                                box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+                                transition: all 0.2s ease;
+                            ">📱 分享</button>
+
+                            <button id="copy-btn-{idx}" onclick="copyText_{idx}()" style="
+                                background-color: #ff4b4b;
+                                color: white;
+                                border: none;
+                                padding: 6px 14px;
+                                border-radius: 6px;
+                                cursor: pointer;
+                                font-size: 13px;
+                                font-weight: bold;
+                                box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+                                transition: all 0.2s ease;
+                            ">📋 复制本班报告</button>
+                        </div>
                         
-                        <pre style="margin: 0; white-space: pre-wrap; word-break: break-word; font-size: 14px; line-height: 1.6; color: #31333f;">{c_content}</pre>
+                        <pre style="margin-top: 30px; margin-bottom: 0; white-space: pre-wrap; word-break: break-word; font-size: 14px; line-height: 1.6; color: #31333f;">{c_content}</pre>
                     </div>
 
                     <script>
-                    function copyText_{idx}() {{
-                        const text = `{escaped_content}`;
-                        const btn = document.getElementById('copy-btn-{idx}');
-                        
-                        function showSuccess() {{
-                            btn.innerText = "✅ 复制成功！";
-                            btn.style.backgroundColor = "#28a745";
-                            setTimeout(() => {{
-                                btn.innerText = "📋 复制本班报告";
-                                btn.style.backgroundColor = "#ff4b4b";
-                            }}, 2000);
-                        }}
+                    const rawText_{idx} = `{escaped_content}`;
 
+                    function showSuccess_{idx}(msg) {{
+                        const btn = document.getElementById('copy-btn-{idx}');
+                        btn.innerText = "✅ " + msg;
+                        btn.style.backgroundColor = "#28a745";
+                        setTimeout(() => {{
+                            btn.innerText = "📋 复制本班报告";
+                            btn.style.backgroundColor = "#ff4b4b";
+                        }}, 2000);
+                    }}
+
+                    function copyText_{idx}() {{
                         if (navigator.clipboard && window.isSecureContext) {{
-                            navigator.clipboard.writeText(text).then(showSuccess).catch(err => {{
-                                fallbackCopy(text, showSuccess);
+                            navigator.clipboard.writeText(rawText_{idx}).then(() => showSuccess_{idx}("复制成功！")).catch(err => {{
+                                fallbackCopy_{idx}(rawText_{idx});
                             }});
                         }} else {{
-                            fallbackCopy(text, showSuccess);
+                            fallbackCopy_{idx}(rawText_{idx});
                         }}
                     }}
 
-                    function fallbackCopy(text, callback) {{
+                    function fallbackCopy_{idx}(text) {{
                         const textArea = document.createElement("textarea");
                         textArea.value = text;
                         textArea.style.position = "fixed";
@@ -276,18 +325,29 @@ if st.session_state.btn_clicked:
                         textArea.select();
                         try {{
                             document.execCommand('copy');
-                            callback();
+                            showSuccess_{idx}("复制成功！");
                         }} catch (err) {{
                             alert('复制失败，请手动选择框内文字复制');
                         }}
                         document.body.removeChild(textArea);
                     }}
+
+                    function shareText_{idx}() {{
+                        if (navigator.share) {{
+                            navigator.share({{
+                                title: '{c_name} 打卡报告',
+                                text: rawText_{idx}
+                            }}).catch(console.error);
+                        }} else {{
+                            copyText_{idx}();
+                            alert('文本已自动复制！手机端可在微信等应用中直接长按粘贴。');
+                        }}
+                    }}
                     </script>
                     """
                     
-                    # 根据文字行数自适应调整框高度
                     line_count = len(c_content.split('\n'))
-                    card_height = max(180, line_count * 24 + 60)
+                    card_height = max(220, line_count * 24 + 80)
                     
                     components.html(custom_copy_card, height=card_height)
 else:
