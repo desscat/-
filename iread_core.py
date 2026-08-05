@@ -15,6 +15,10 @@ DEFAULT_TEMPLATE = """[以下为{date_title}的打卡情况]
 ⏰【该起床打卡啦】
 {zeros}"""
 
+DEFAULT_MATRIX_TEMPLATE = """❤️{date_title} 全阅读打卡❤️
+
+{matrix}"""
+
 def parse_name_map(map_str):
     mapping = {}
     if not map_str:
@@ -75,7 +79,10 @@ def process_student_data(class_name, name, listen, anim, books, req_listen, req_
         
     return "MID", f"{eng_name}：已达标 (距离全勤还缺：{', '.join(missing)})"
 
-def fetch_data_via_api(auth_token, report_type, start_date, end_date, class_rules_config, name_maps_config, default_rule, template_str):
+def fetch_data_via_api(auth_token, report_type, start_date, end_date, class_rules_config, name_maps_config, default_rule, template_str, mode="traditional", emoji_config=None):
+    if emoji_config is None:
+        emoji_config = {"full": "🍓", "part": "✅", "zero": "🚫", "badge": "✔️"}
+
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
         "Token": auth_token.strip(),
@@ -92,7 +99,73 @@ def fetch_data_via_api(auth_token, report_type, start_date, end_date, class_rule
         raw_data = resp.json().get("data", [])
         classes_data = raw_data.get("rows", []) if isinstance(raw_data, dict) else raw_data
 
-        # 校验计算天数与时间范围
+        # 📅 矩阵日历模式
+        if mode == "matrix":
+            d_start = date.today() - timedelta(days=date.today().weekday())
+            d_end = d_start + timedelta(days=6)
+            date_title = f"{d_start.month}.{d_start.day}--{d_end.month}.{d_end.day}"
+
+            for item in classes_data:
+                class_id = str(item.get("class_id") or item.get("id"))
+                class_name = item.get("class_name") or item.get("name") or f"班级_{class_id}"
+                
+                base_rule = next((class_rules_config[k] for k in class_rules_config if k in class_name or class_name in k), default_rule)
+                matched_map = next((name_maps_config[k] for k in name_maps_config if k in class_name or class_name in k), "")
+                class_mapping = parse_name_map(matched_map)
+
+                student_matrix = {}
+
+                for day_idx in range(7):
+                    curr_date = (d_start + timedelta(days=day_idx)).strftime("%Y-%m-%d")
+                    stats_url = f"https://v2.ireadabc.com/api/v3/reports/statistics/class/{class_id}"
+                    stat_resp = requests.get(stats_url, headers=headers, params={"start": curr_date, "end": curr_date}, timeout=15)
+
+                    if stat_resp.status_code == 200:
+                        s_json = stat_resp.json()
+                        students_raw = s_json.get("data", []) if isinstance(s_json, dict) else s_json
+                        if isinstance(students_raw, dict):
+                            students_raw = students_raw.get("rows", []) or students_raw.get("students", [])
+
+                        for s in students_raw:
+                            raw_name = s.get("name") or s.get("student_name") or ""
+                            clean_n = re.sub(r'[a-zA-Z\s]', '', raw_name)
+                            eng_name = class_mapping.get(clean_n, class_mapping.get(raw_name, raw_name))
+
+                            if eng_name not in student_matrix:
+                                student_matrix[eng_name] = []
+
+                            listen = clean_num(s.get("listen") or s.get("audio_time") or 0)
+                            anim = clean_num(s.get("animation") or s.get("anim") or 0)
+                            books = clean_num(s.get("grading") or s.get("read") or 0)
+
+                            if listen >= base_rule["listen"] and anim >= base_rule["anim"] and books >= base_rule["books"]:
+                                emoji = emoji_config.get("full", "🍓")
+                            elif listen == 0 and anim == 0 and books == 0:
+                                emoji = emoji_config.get("zero", "🚫")
+                            else:
+                                emoji = emoji_config.get("part", "✅")
+                            
+                            student_matrix[eng_name].append(emoji)
+
+                matrix_lines = []
+                for s_name, emojis in student_matrix.items():
+                    while len(emojis) < 7:
+                        emojis.append(emoji_config.get("zero", "🚫"))
+                    
+                    line = f"{''.join(emojis)} {s_name}"
+                    if emojis.count(emoji_config.get("full", "🍓")) == 7 and emoji_config.get("badge"):
+                        line += f" {emoji_config.get('badge')}"
+                    matrix_lines.append(line)
+
+                reports_dict[class_name] = template_str.format(
+                    class_name=class_name,
+                    date_title=date_title,
+                    matrix="\n".join(matrix_lines)
+                )
+
+            return reports_dict, None
+
+        # 📋 传统模式
         days_count = 1
         if report_type == "昨日汇报":
             yest = date.today() - timedelta(days=1)
