@@ -1,5 +1,4 @@
 import requests
-import json
 from datetime import date, timedelta
 
 DEFAULT_TEMPLATE = """📌 {class_name} {report_type}（{date_title}）
@@ -32,7 +31,6 @@ DEFAULT_MATRIX_TEMPLATE = """❤️ {date_title} 全阅读打卡 ❤️
 {stats}"""
 
 def auto_login(username, password):
-    # 按照实际 Payload 参数 (phone, password) 构建请求
     url = "https://v2.ireadabc.com/api/login"
     payload = {
         "phone": str(username).strip(),
@@ -44,16 +42,10 @@ def auto_login(username, password):
     }
     try:
         resp = requests.post(url, json=payload, headers=headers, timeout=10)
-        
         if resp.status_code != 200:
             return None, f"登录接口响应异常 (HTTP {resp.status_code})"
             
-        try:
-            res_json = resp.json()
-        except Exception:
-            return None, f"服务器未返回 JSON 数据，响应预览：{resp.text[:100]}"
-
-        # 提取返回数据中的 token
+        res_json = resp.json()
         token = None
         if isinstance(res_json, dict):
             if "data" in res_json and isinstance(res_json["data"], dict):
@@ -66,7 +58,6 @@ def auto_login(username, password):
         else:
             msg = res_json.get("msg") or res_json.get("message") or "登录失败，请检查手机号或密码"
             return None, msg
-
     except Exception as e:
         return None, f"登录请求发生异常：{str(e)}"
 
@@ -90,23 +81,32 @@ def fetch_data_via_api(token, report_type, start_date, end_date, class_rules, na
         else:
             s_date, e_date = start_date, end_date
 
-    url = f"https://v2.ireadabc.com/api/student-study-records?start_date={s_date}&end_date={e_date}"
     headers = {
         "Authorization": f"Bearer {token}", 
         "Content-Type": "application/json",
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
     }
-    
+
     try:
-        resp = requests.get(url, headers=headers, timeout=15)
-        if resp.status_code != 200:
-            return None, f"数据接口请求失败，状态码：{resp.status_code}"
-        
-        res_json = resp.json()
-        raw_data = res_json.get("data", [])
-        
-        if not raw_data:
-            return None, "暂未查询到该时间段内的学生打卡数据"
+        # 1. 先获取老师名下的班级列表，拿到班级名称和对应的 id
+        classes_url = "https://v2.ireadabc.com/api/teacher/classes" # 或者通用的获取班级列表接口
+        # 如果上一步获取班级列表用的是别的路由，也可以直接通过通用列表获取，这里尝试兼容多路线
+        # 让我们先请求教师班级列表
+        cls_resp = requests.get("https://v2.ireadabc.com/api/classes", headers=headers, timeout=10)
+        if cls_resp.status_code != 200:
+            # 尝试备用班级接口
+            cls_resp = requests.get("https://v2.ireadabc.com/api/teacher/classes", headers=headers, timeout=10)
+            
+        if cls_resp.status_code != 200:
+            return None, f"获取班级列表失败 (HTTP {cls_resp.status_code})"
+            
+        cls_json = cls_resp.json()
+        classes_data = cls_json.get("data", [])
+        if not classes_data and isinstance(cls_json, list):
+            classes_data = cls_json
+
+        if not classes_data:
+            return None, "未能在该账号下找到任何班级数据"
 
         parsed_maps = {}
         for c_name, map_str in name_maps.items():
@@ -119,40 +119,56 @@ def fetch_data_via_api(token, report_type, start_date, end_date, class_rules, na
                         if len(parts) == 2:
                             parsed_maps[c_name][parts[0].strip()] = parts[1].strip()
 
-        grouped_data = {}
-        for item in raw_data:
-            c_name = item.get("className", "默认班级")
+        reports = {}
+        s_str = s_date.strftime("%Y-%m-%d")
+        e_str = e_date.strftime("%Y-%m-%d")
+
+        for cls_item in classes_data:
+            c_name = cls_item.get("className") or cls_item.get("name")
+            c_id = cls_item.get("classId") or cls_item.get("id")
+            
+            if not c_name or not c_id:
+                continue
+                
             if class_rules and c_name not in class_rules:
                 continue
-            if c_name not in grouped_data:
-                grouped_data[c_name] = []
-            grouped_data[c_name].append(item)
 
-        if not grouped_data:
-            return None, "未找到已配置班级的打卡数据，请确认班级名称是否一致"
-
-        reports = {}
-        
-        if mode == "matrix":
-            days_count = (e_date - s_date).days + 1
-            date_title = f"{s_date.month}.{s_date.day}--{e_date.month}.{e_date.day}"
+            # 2. 按照新版 v3 接口规范逐个班级拉取学情数据
+            detail_url = f"https://v2.ireadabc.com/api/v3/reports/statistics/class/{c_id}?start={s_str}&end={e_str}"
+            det_resp = requests.get(detail_url, headers=headers, timeout=10)
             
-            e_full = emoji_config.get("full", "⭐") if emoji_config else "⭐"
-            e_part = emoji_config.get("part", "✨") if emoji_config else "✨"
-            e_zero = emoji_config.get("zero", "⚪") if emoji_config else "⚪"
-            e_badge = emoji_config.get("badge", "👑") if emoji_config else "👑"
+            if det_resp.status_code != 200:
+                continue
+                
+            det_json = det_resp.json()
+            students = det_json.get("data", [])
+            if not students and isinstance(det_json, list):
+                students = det_json
+            if not students and isinstance(det_json.get("data"), dict):
+                students = det_json.get("data", {}).get("students", [])
 
-            for c_name, students in grouped_data.items():
-                rule = class_rules.get(c_name, default_rule)
+            if not students:
+                continue
+
+            rule = class_rules.get(c_name, default_rule)
+            c_map = parsed_maps.get(c_name, {})
+
+            if mode == "matrix":
+                days_count = (e_date - s_date).days + 1
+                date_title = f"{s_date.month}.{s_date.day}--{e_date.month}.{e_date.day}"
+                
+                e_full = emoji_config.get("full", "⭐") if emoji_config else "⭐"
+                e_part = emoji_config.get("part", "✨") if emoji_config else "✨"
+                e_zero = emoji_config.get("zero", "⚪") if emoji_config else "⚪"
+                e_badge = emoji_config.get("badge", "👑") if emoji_config else "👑"
+
+                matrix_lines = []
                 t_listen = rule.get("listen", 60)
                 t_anim = rule.get("anim", 15)
                 t_books = rule.get("books", 2)
-                
-                c_map = parsed_maps.get(c_name, {})
-                matrix_lines = []
 
                 for stu in students:
-                    zh_name = stu.get("studentName", "")
+                    zh_name = stu.get("studentName") or stu.get("name", "")
                     en_name = c_map.get(zh_name, "")
                     display_name = f"{zh_name}{en_name}"
                     
@@ -191,35 +207,30 @@ def fetch_data_via_api(token, report_type, start_date, end_date, class_rules, na
                     matrix_lines.append(f"{emoji_str}  {display_name}")
 
                 matrix_text = "\n".join(matrix_lines)
-                
-                report_content = template_str.format(
+                reports[c_name] = template_str.format(
                     date_title=date_title,
                     matrix=matrix_text,
                     stats="{stats}"
                 )
-                reports[c_name] = report_content
 
-        else:
-            days_count = max(1, (e_date - s_date).days + 1)
-            date_title = f"{s_date.month}月{s_date.day}日" if s_date == e_date else f"{s_date.month}.{s_date.day}-{e_date.month}.{e_date.day}"
+            else:
+                days_count = max(1, (e_date - s_date).days + 1)
+                date_title = f"{s_date.month}月{s_date.day}日" if s_date == e_date else f"{s_date.month}.{s_date.day}-{e_date.month}.{e_date.day}"
 
-            for c_name, students in grouped_data.items():
-                rule = class_rules.get(c_name, default_rule)
                 t_listen = rule.get("listen", 60) * days_count
                 t_anim = rule.get("anim", 15) * days_count
                 t_books = rule.get("books", 2) * days_count
 
-                c_map = parsed_maps.get(c_name, {})
                 both, listen_only, anim_only, books, none = [], [], [], [], []
 
                 for stu in students:
-                    zh_name = stu.get("studentName", "")
+                    zh_name = stu.get("studentName") or stu.get("name", "")
                     en_name = c_map.get(zh_name, "")
                     display_name = f"{zh_name}({en_name})" if en_name else zh_name
 
-                    l_time = stu.get("totalListenTime", 0)
-                    a_time = stu.get("totalAnimTime", 0)
-                    b_cnt = stu.get("totalBooksCount", 0)
+                    l_time = stu.get("totalListenTime") or stu.get("listenTime", 0)
+                    a_time = stu.get("totalAnimTime") or stu.get("animTime", 0)
+                    b_cnt = stu.get("totalBooksCount") or stu.get("booksCount", 0)
 
                     is_listen = l_time >= t_listen
                     is_anim = a_time >= t_anim
@@ -237,7 +248,7 @@ def fetch_data_via_api(token, report_type, start_date, end_date, class_rules, na
                     if is_books:
                         books.append(display_name)
 
-                report_content = template_str.format(
+                reports[c_name] = template_str.format(
                     class_name=c_name,
                     report_type=report_type,
                     date_title=date_title,
@@ -255,7 +266,9 @@ def fetch_data_via_api(token, report_type, start_date, end_date, class_rules, na
                     none_count=len(none),
                     none_list="、".join(none) if none else "无"
                 )
-                reports[c_name] = report_content
+
+        if not reports:
+            return None, "未能成功解析到任何班级的打卡统计数据"
 
         return reports, None
 
