@@ -47,9 +47,9 @@ url_template = params.get("template", DEFAULT_TEMPLATE)
 url_matrix_template = params.get("matrix_template", DEFAULT_MATRIX_TEMPLATE)
 
 try:
-    url_emojis = json.loads(params.get("emojis", '{"full": "🍓", "part": "✅", "zero": "🚫", "badge": "✔️"}'))
+    url_emojis = json.loads(params.get("emojis", '{"full": "⭐", "part": "✨", "zero": "⚪", "badge": "👑"}'))
 except:
-    url_emojis = {"full": "🍓", "part": "✅", "zero": "🚫", "badge": "✔️"}
+    url_emojis = {"full": "⭐", "part": "✨", "zero": "⚪", "badge": "👑"}
 
 if "token" not in st.session_state:
     st.session_state.token = url_token
@@ -83,7 +83,7 @@ with st.sidebar:
         st.session_state.name_maps = {}
         st.session_state.custom_template = DEFAULT_TEMPLATE
         st.session_state.matrix_template = DEFAULT_MATRIX_TEMPLATE
-        st.session_state.emojis = {"full": "🍓", "part": "✅", "zero": "🚫", "badge": "✔️"}
+        st.session_state.emojis = {"full": "⭐", "part": "✨", "zero": "⚪", "badge": "👑"}
         st.session_state.btn_clicked = False
         st.rerun()
 
@@ -115,7 +115,7 @@ with st.sidebar:
     st.subheader("3. 🎨 DIY 格式与 Emoji 主题")
     with st.expander("✨ 点击展开/修改模板与 Emoji 主题", expanded=False):
         if output_mode == "🍓 矩阵式周打卡榜":
-            selected_preset = st.selectbox("选择 Emoji 预设主题", list(EMOJI_PRESETS.keys()), index=1)
+            selected_preset = st.selectbox("选择 Emoji 预设主题", list(EMOJI_PRESETS.keys()), index=2)
             if selected_preset != "自定义" and EMOJI_PRESETS[selected_preset]:
                 st.session_state.emojis = EMOJI_PRESETS[selected_preset]
                 save_to_url()
@@ -123,11 +123,11 @@ with st.sidebar:
             st.markdown("**自定义 Emoji 标记：**")
             col_e1, col_e2 = st.columns(2)
             with col_e1:
-                e_full = st.text_input("全勤达标", value=st.session_state.emojis.get("full", "🍓"))
-                e_part = st.text_input("部分达标", value=st.session_state.emojis.get("part", "✅"))
+                e_full = st.text_input("全勤达标", value=st.session_state.emojis.get("full", "⭐"))
+                e_part = st.text_input("部分达标", value=st.session_state.emojis.get("part", "✨"))
             with col_e2:
-                e_zero = st.text_input("未打卡", value=st.session_state.emojis.get("zero", "🚫"))
-                e_badge = st.text_input("满勤尾巴标记", value=st.session_state.emojis.get("badge", "✔️"))
+                e_zero = st.text_input("未打卡", value=st.session_state.emojis.get("zero", "⚪"))
+                e_badge = st.text_input("满勤尾巴标记", value=st.session_state.emojis.get("badge", "👑"))
             
             new_emojis = {"full": e_full, "part": e_part, "zero": e_zero, "badge": e_badge}
             if new_emojis != st.session_state.emojis:
@@ -135,7 +135,7 @@ with st.sidebar:
                 save_to_url()
             
             st.markdown("**自定义矩阵模板：**")
-            mat_tmpl_input = st.text_area("矩阵模板", value=st.session_state.matrix_template, height=120)
+            mat_tmpl_input = st.text_area("矩阵模板", value=st.session_state.matrix_template, height=180)
             if mat_tmpl_input != st.session_state.matrix_template:
                 st.session_state.matrix_template = mat_tmpl_input
                 save_to_url()
@@ -228,11 +228,11 @@ if st.session_state.btn_clicked:
                 for idx, (c_name, c_content) in enumerate(reports.items()):
                     st.markdown(f"### 📍 {c_name} 打卡报告")
                     
-                    # 1. 统计全勤/加油/未打卡人数
+                    # 1. 计算全勤/加油/未打卡人数
                     lines = c_content.split('\n')
-                    f_emoji = st.session_state.emojis.get("full", "🍓")
-                    p_emoji = st.session_state.emojis.get("part", "✅")
-                    z_emoji = st.session_state.emojis.get("zero", "🚫")
+                    f_emoji = st.session_state.emojis.get("full", "⭐")
+                    p_emoji = st.session_state.emojis.get("part", "✨")
+                    z_emoji = st.session_state.emojis.get("zero", "⚪")
                     
                     full_cnt, part_cnt, zero_cnt = 0, 0, 0
                     for line in lines:
@@ -244,21 +244,20 @@ if st.session_state.btn_clicked:
                             zero_cnt += 1
 
                     total_students = full_cnt + part_cnt + zero_cnt
+                    pct = round(full_cnt / total_students * 100) if total_students > 0 else 0
                     
-                    # 2. 将学情统计拼接在最底部（原模板提醒文字的下方）
-                    final_share_content = c_content.strip()
-                    if total_students > 0:
-                        pct = round(full_cnt / total_students * 100)
-                        stats_text = (
-                            f"\n\n--------------------\n"
-                            f"📊 学情统计汇总：\n"
-                            f"🌟 全勤达标：{full_cnt} 人 ({pct}%)\n"
-                            f"💪 持续加油：{part_cnt} 人\n"
-                            f"⚠️ 未打卡提醒：{zero_cnt} 人"
-                        )
-                        final_share_content += stats_text
+                    # 2. 生成动态统计文案
+                    stats_text = (
+                        f"📊 学情统计汇总：\n"
+                        f"🌟 全勤达标：{full_cnt} 人（{pct}%）\n"
+                        f"💪 持续加油：{part_cnt} 人\n"
+                        f"⚠️ 未打卡提醒：{zero_cnt} 人"
+                    )
+                    
+                    # 替换模板中的 {stats} 占位符
+                    final_share_content = c_content.replace("{stats}", stats_text).strip()
 
-                    # 转义特殊字符
+                    # 转义特殊字符，规避 JS 字符串拼接语法错误
                     escaped_content = (
                         final_share_content.replace("\\", "\\\\")
                         .replace("`", "\\`")
