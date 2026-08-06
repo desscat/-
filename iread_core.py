@@ -3,27 +3,20 @@ import requests
 import traceback
 from datetime import date, timedelta
 
-DEFAULT_TEMPLATE = """📌 {class_name} {report_type}（{date_title}）
+# 💡 适配你最新要求的传统单日/多日详细汇报模板
+DEFAULT_TEMPLATE = """[以下为{date_title}的打卡情况]
 
-🌟 【听音&动画双达标】({both_count}人)：
-{both_list}
+🏆 {class_name}
 
-🎵 【仅听音达标】({listen_only_count}人)：
-{listen_only_list}
+🌟 【今日光荣榜】
+{glory_list}
 
-📺 【仅动画达标】({anim_only_count}人)：
-{anim_only_list}
+💪 【再努努力】
+{effort_list}
 
-📖 【绘本达标】({books_count}人)：
-{books_list}
+⏰ 【该起床打卡啦】
+{zero_list}"""
 
-❌ 【未达标/未打卡】({none_count}人)：
-{none_list}
-
---------------------
-💡 达标标准：每日听音 ≥ {target_listen}分钟，每日动画 ≥ {target_anim}分钟，绘本 ≥ {target_books}本。"""
-
-# 💡 代码内默认模板：已彻底删除了上方重复的简陋学情统计，只保留矩阵、底部 {stats} 以及温馨提示
 DEFAULT_MATRIX_TEMPLATE = """❤️ {date_title} 全阅读打卡 ❤️
 
 {matrix}
@@ -205,7 +198,7 @@ def fetch_data_via_api(auth_token, report_type, start_date, end_date, class_rule
 
             return reports_dict, None
 
-        # 📋 传统文字分组模式
+        # 📋 传统文字分组模式（适配你的新要求格式）
         days_count = 1
         if report_type == "昨日汇报":
             yest = date.today() - timedelta(days=1)
@@ -250,60 +243,55 @@ def fetch_data_via_api(auth_token, report_type, start_date, end_date, class_rule
                 if isinstance(students_raw, dict):
                     students_raw = students_raw.get("rows", []) or students_raw.get("students", []) or students_raw.get("list", [])
 
-                students_data = [{
-                    "name": s.get("name") or s.get("student_name") or s.get("studentName") or "",
-                    "listen": s.get("listen") or s.get("audio_time") or s.get("listenTime") or 0,
-                    "anim": s.get("animation") or s.get("anim") or s.get("animTime") or 0,
-                    "books": s.get("grading") or s.get("read") or s.get("booksCount") or 0
-                } for s in students_raw]
+                glory_lines = []
+                effort_lines = []
+                zero_lines = []
 
-                both, listen_only, anim_only, books_list_group, none = [], [], [], [], []
-                
-                for student in students_data:
-                    raw_name = student["name"]
+                for s in students_raw:
+                    raw_name = s.get("name") or s.get("student_name") or s.get("studentName") or ""
                     if not raw_name:
                         continue
                     clean_n = re.sub(r'[a-zA-Z\s]', '', raw_name)
                     eng_name = class_mapping.get(clean_n, class_mapping.get(raw_name, ""))
                     display_name = format_student_name(raw_name, eng_name)
 
-                    listen = clean_num(student["listen"])
-                    anim = clean_num(student["anim"])
-                    books = clean_num(student["books"])
+                    listen = clean_num(s.get("listen") or s.get("audio_time") or s.get("listenTime") or 0)
+                    anim = clean_num(s.get("animation") or s.get("anim") or s.get("animTime") or 0)
+                    books = clean_num(s.get("grading") or s.get("read") or s.get("booksCount") or 0)
 
-                    is_listen = listen >= matched_rule["listen"]
-                    is_anim = anim >= matched_rule["anim"]
-                    is_books = books >= matched_rule["books"]
+                    target_l = matched_rule["listen"]
+                    target_a = matched_rule["anim"]
+                    target_b = matched_rule["books"]
 
-                    if is_listen and is_anim:
-                        both.append(display_name)
-                    elif is_listen:
-                        listen_only.append(display_name)
-                    elif is_anim:
-                        anim_only.append(display_name)
+                    is_listen = listen >= target_l
+                    is_anim = anim >= target_a
+                    is_books = books >= target_b
+
+                    # 完全达标 -> 🌟 【今日光荣榜】
+                    if is_listen and is_anim and is_books:
+                        glory_lines.append(f"{display_name} (听音{listen}min, 动画{anim}min, 绘本{books}本)")
+                    # 完全没打卡 -> ⏰ 【该起床打卡啦】
+                    elif listen == 0 and anim == 0 and books == 0:
+                        zero_lines.append(display_name)
+                    # 部分达标（再努努力）
                     else:
-                        none.append(display_name)
-
-                    if is_books:
-                        books_list_group.append(display_name)
+                        diffs = []
+                        if not is_listen:
+                            diffs.append(f"听音还缺{target_l - listen}min")
+                        if not is_anim:
+                            diffs.append(f"动画还缺{target_a - anim}min")
+                        if not is_books:
+                            diffs.append(f"绘本还缺{target_b - books}本")
+                        
+                        diff_str = ", ".join(diffs)
+                        effort_lines.append(f"{display_name}：已达标 (距离全勤还缺：{diff_str})")
 
                 reports_dict[class_name] = template_str.format(
                     class_name=class_name,
-                    report_type=report_type,
                     date_title=date_title,
-                    target_listen=base_rule["listen"],
-                    target_anim=base_rule["anim"],
-                    target_books=base_rule["books"],
-                    both_count=len(both),
-                    both_list="、".join(both) if both else "无",
-                    listen_only_count=len(listen_only),
-                    listen_only_list="、".join(listen_only) if listen_only else "无",
-                    anim_only_count=len(anim_only),
-                    anim_only_list="、".join(anim_only) if anim_only else "无",
-                    books_count=len(books_list_group),
-                    books_list="、".join(books_list_group) if books_list_group else "无",
-                    none_count=len(none),
-                    none_list="、".join(none) if none else "无"
+                    glory_list="\n".join(glory_lines) if glory_lines else "无",
+                    effort_list="\n".join(effort_lines) if effort_lines else "无",
+                    zero_list="\n".join(zero_lines) if zero_lines else "无"
                 )
 
         return reports_dict, None
