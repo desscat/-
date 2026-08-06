@@ -3,7 +3,7 @@ import requests
 import traceback
 from datetime import date, timedelta
 
-# 💡 适配你最新要求的传统单日/多日详细汇报模板
+# 💡 完美适配你要求的传统汇报模板格式
 DEFAULT_TEMPLATE = """[以下为{date_title}的打卡情况]
 
 🏆 {class_name}
@@ -17,6 +17,7 @@ DEFAULT_TEMPLATE = """[以下为{date_title}的打卡情况]
 ⏰ 【该起床打卡啦】
 {zero_list}"""
 
+# 💡 干净无重复的矩阵模板
 DEFAULT_MATRIX_TEMPLATE = """❤️ {date_title} 全阅读打卡 ❤️
 
 {matrix}
@@ -187,7 +188,10 @@ def fetch_data_via_api(auth_token, report_type, start_date, end_date, class_rule
 
                 attendance_rate = round((full_attendance_count / total_students * 100), 1) if total_students > 0 else 0.0
 
-                reports_dict[class_name] = template_str.format(
+                # 确保矩阵模式下使用的是 DEFAULT_MATRIX_TEMPLATE 格式
+                curr_matrix_template = template_str if "{matrix}" in template_str else DEFAULT_MATRIX_TEMPLATE
+
+                reports_dict[class_name] = curr_matrix_template.format(
                     date_title=date_title,
                     matrix="\n".join(matrix_lines) if matrix_lines else "（暂无打卡数据）",
                     total_students=total_students,
@@ -198,7 +202,7 @@ def fetch_data_via_api(auth_token, report_type, start_date, end_date, class_rule
 
             return reports_dict, None
 
-        # 📋 传统文字分组模式（适配你的新要求格式）
+        # 📋 传统文字分组模式（完美对应你截图中的新版详细格式）
         days_count = 1
         if report_type == "昨日汇报":
             yest = date.today() - timedelta(days=1)
@@ -273,7 +277,7 @@ def fetch_data_via_api(auth_token, report_type, start_date, end_date, class_rule
                     # 完全没打卡 -> ⏰ 【该起床打卡啦】
                     elif listen == 0 and anim == 0 and books == 0:
                         zero_lines.append(display_name)
-                    # 部分达标（再努努力）
+                    # 部分达标 -> 💪 【再努努力】
                     else:
                         diffs = []
                         if not is_listen:
@@ -286,7 +290,10 @@ def fetch_data_via_api(auth_token, report_type, start_date, end_date, class_rule
                         diff_str = ", ".join(diffs)
                         effort_lines.append(f"{display_name}：已达标 (距离全勤还缺：{diff_str})")
 
-                reports_dict[class_name] = template_str.format(
+                # 强制使用我们定义好的新传统模板，防止被网页残留的旧模板污染
+                curr_traditional_template = template_str if "{glory_list}" in template_str else DEFAULT_TEMPLATE
+
+                reports_dict[class_name] = curr_traditional_template.format(
                     class_name=class_name,
                     date_title=date_title,
                     glory_list="\n".join(glory_lines) if glory_lines else "无",
