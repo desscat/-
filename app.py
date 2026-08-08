@@ -4,12 +4,10 @@ import streamlit.components.v1 as components
 from datetime import date, timedelta
 from iread_core import auto_login, fetch_data_via_api, DEFAULT_TEMPLATE, DEFAULT_MATRIX_TEMPLATE
 
-# 💡 尝试引入 streamlit-localstorage，如果未安装则自动降级到纯 session_state
-try:
-    import streamlit_localstorage as sl
-    has_localstorage = True
-except ImportError:
-    has_localstorage = False
+# 🛑 核心杀招：如果发现 URL 带有任何多余参数，强行在第一次加载时清空它，让地址栏永远保持干净！
+if len(st.query_params) > 0:
+    st.query_params.clear()
+    st.rerun()
 
 if "btn_clicked" not in st.session_state:
     st.session_state.btn_clicked = False
@@ -33,31 +31,7 @@ EMOJI_PRESETS = {
     "🏆 勋章荣誉": {"full": "🏆", "part": "🥇", "zero": "❌", "badge": "🎖️"}
 }
 
-# 🛠️ 初始化本地持久化组件
-local_storage = sl.LocalStorage() if has_localstorage else None
-
-# 从本地缓存或默认值中恢复状态
-if "initialized_storage" not in st.session_state:
-    st.session_state.initialized_storage = True
-    if local_storage:
-        try:
-            saved_token = local_storage.getItem("iread_token")
-            saved_rules = local_storage.getItem("iread_rules")
-            saved_maps = local_storage.getItem("iread_maps")
-            saved_tmpl = local_storage.getItem("iread_tmpl")
-            saved_mat = local_storage.getItem("iread_mat")
-            saved_emojis = local_storage.getItem("iread_emojis")
-
-            st.session_state.token = saved_token if saved_token else ""
-            st.session_state.class_rules = json.loads(saved_rules) if saved_rules else {}
-            st.session_state.name_maps = json.loads(saved_maps) if saved_maps else {}
-            st.session_state.custom_template = saved_tmpl if saved_tmpl else DEFAULT_TEMPLATE
-            st.session_state.matrix_template = saved_mat if saved_mat else DEFAULT_MATRIX_TEMPLATE
-            st.session_state.emojis = json.loads(saved_emojis) if saved_emojis else {"full": "⭐", "part": "✨", "zero": "⚪", "badge": "👑"}
-        except Exception:
-            pass
-
-# 兜底初始化
+# 🛡️ 纯 Session State 会话状态兜底初始化（绝不污染 URL）
 if "token" not in st.session_state:
     st.session_state.token = ""
 if "class_rules" not in st.session_state:
@@ -71,28 +45,12 @@ if "matrix_template" not in st.session_state:
 if "emojis" not in st.session_state:
     st.session_state.emojis = {"full": "⭐", "part": "✨", "zero": "⚪", "badge": "👑"}
 
-def save_to_local():
-    """将配置安全保存在浏览器本地缓存中，URL 保持绝对干净"""
-    if local_storage:
-        try:
-            local_storage.setItem("iread_token", st.session_state.token)
-            local_storage.setItem("iread_rules", json.dumps(st.session_state.class_rules, ensure_ascii=False))
-            local_storage.setItem("iread_maps", json.dumps(st.session_state.name_maps, ensure_ascii=False))
-            local_storage.setItem("iread_tmpl", st.session_state.custom_template)
-            local_storage.setItem("iread_mat", st.session_state.matrix_template)
-            local_storage.setItem("iread_emojis", json.dumps(st.session_state.emojis, ensure_ascii=False))
-        except Exception:
-            pass
-
 with st.sidebar:
     st.header("⚙️ 参数配置")
     
     if st.button("🧹 清空/重置所有配置", type="secondary", use_container_width=True):
-        if local_storage:
-            try:
-                local_storage.deleteAll()
-            except Exception:
-                pass
+        # 彻底清空 URL 参数与所有状态
+        st.query_params.clear()
         st.session_state.token = ""
         st.session_state.class_rules = {}
         st.session_state.name_maps = {}
@@ -111,7 +69,6 @@ with st.sidebar:
         token_input = st.text_input("Token", value=st.session_state.token, type="password")
         if token_input != st.session_state.token:
             st.session_state.token = token_input
-            save_to_local()
 
     st.subheader("2. 模式与时间选择")
     output_mode = st.radio("选择输出格式", ["🍓 矩阵式周打卡榜", "📋 传统分组文字汇总"], index=0)
@@ -133,7 +90,6 @@ with st.sidebar:
             selected_preset = st.selectbox("选择 Emoji 预设主题", list(EMOJI_PRESETS.keys()), index=2)
             if selected_preset != "自定义" and EMOJI_PRESETS[selected_preset]:
                 st.session_state.emojis = EMOJI_PRESETS[selected_preset]
-                save_to_local()
 
             st.markdown("**自定义 Emoji 标记：**")
             col_e1, col_e2 = st.columns(2)
@@ -144,22 +100,13 @@ with st.sidebar:
                 e_zero = st.text_input("未打卡", value=st.session_state.emojis.get("zero", "⚪"))
                 e_badge = st.text_input("满勤尾巴标记", value=st.session_state.emojis.get("badge", "👑"))
             
-            new_emojis = {"full": e_full, "part": e_part, "zero": e_zero, "badge": e_badge}
-            if new_emojis != st.session_state.emojis:
-                st.session_state.emojis = new_emojis
-                save_to_local()
+            st.session_state.emojis = {"full": e_full, "part": e_part, "zero": e_zero, "badge": e_badge}
             
             st.markdown("**自定义矩阵模板：**")
-            mat_tmpl_input = st.text_area("矩阵模板", value=st.session_state.matrix_template, height=180)
-            if mat_tmpl_input != st.session_state.matrix_template:
-                st.session_state.matrix_template = mat_tmpl_input
-                save_to_local()
+            st.session_state.matrix_template = st.text_area("矩阵模板", value=st.session_state.matrix_template, height=180)
         else:
             st.markdown("**自定义传统分组模板：**")
-            custom_tmpl_input = st.text_area("文字模板", value=st.session_state.custom_template, height=180)
-            if custom_tmpl_input != st.session_state.custom_template:
-                st.session_state.custom_template = custom_tmpl_input
-                save_to_local()
+            st.session_state.custom_template = st.text_area("文字模板", value=st.session_state.custom_template, height=180)
 
     st.subheader("4. ⚙️ 班级与映射管理")
     new_class_input = st.text_input("➕ 添加班级：", placeholder="例如：万达K12班")
@@ -167,7 +114,6 @@ with st.sidebar:
         if new_class_input and new_class_input not in st.session_state.class_rules:
             st.session_state.class_rules[new_class_input] = {"listen": 60, "anim": 15, "books": 2}
             st.session_state.name_maps[new_class_input] = ""
-            save_to_local()
             st.rerun()
 
     class_rules_config = {}
@@ -179,18 +125,15 @@ with st.sidebar:
                 del st.session_state.class_rules[c_name]
                 if c_name in st.session_state.name_maps:
                     del st.session_state.name_maps[c_name]
-                save_to_local()
                 st.rerun()
 
             def update_rule(c=c_name):
                 st.session_state.class_rules[c]["listen"] = st.session_state[f"l_{c}"]
                 st.session_state.class_rules[c]["anim"] = st.session_state[f"a_{c}"]
                 st.session_state.class_rules[c]["books"] = st.session_state[f"b_{c}"]
-                save_to_local()
 
             def update_map(c=c_name):
                 st.session_state.name_maps[c] = st.session_state[f"m_{c}"]
-                save_to_local()
 
             st.number_input("每日听音(分)", value=st.session_state.class_rules[c_name]["listen"], step=5, key=f"l_{c_name}", on_change=update_rule)
             st.number_input("每日动画(分)", value=st.session_state.class_rules[c_name]["anim"], step=5, key=f"a_{c_name}", on_change=update_rule)
@@ -218,7 +161,6 @@ if st.session_state.btn_clicked:
             else:
                 final_token = login_token
                 st.session_state.token = login_token
-                save_to_local()
     else:
         final_token = st.session_state.token
 
