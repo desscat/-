@@ -11,7 +11,7 @@ try:
     SUPABASE_KEY = "sb_publishable_PM_84SFDUCbhpiQLJjYT5w_cMziV-vt"
     supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
     has_supabase = True
-except Exception:
+except Exception as e:
     has_supabase = False
 
 # 🛑 核心清理：如果 URL 带有任何多余参数，强行在第一次加载时清空它
@@ -72,14 +72,15 @@ def load_user_data_from_cloud(username: str):
             st.session_state.emojis = data.get("emojis", {"full": "⭐", "part": "✨", "zero": "⚪", "badge": "👑"})
             return True
     except Exception as e:
-        print(f"云端加载失败: {e}")
+        st.error(f"云端加载出错: {e}")
     return False
 
 def save_user_data_to_cloud():
     """将当前的配置自动同步到 Supabase 云端"""
     if not has_supabase:
+        st.warning("⚠️ 未检测到 Supabase 客户端初始化！")
         return
-    # 用手机号或者登录手机号作为云端唯一主键
+    
     u_name = st.session_state.get("username_key", "").strip()
     if not u_name:
         return
@@ -92,12 +93,13 @@ def save_user_data_to_cloud():
         "emojis": st.session_state.emojis
     }
     try:
-        supabase.table("user_configs").upsert({
+        res = supabase.table("user_configs").upsert({
             "username": u_name,
             "config_json": json.dumps(payload_data, ensure_ascii=False)
         }).execute()
+        st.toast("☁️ 成功同步到云端数据库！", icon="🚀")
     except Exception as e:
-        print(f"云端同步失败: {e}")
+        st.error(f"❌ 云端同步失败详情: {e}")
 
 with st.sidebar:
     st.header("⚙️ 参数配置")
@@ -116,12 +118,10 @@ with st.sidebar:
 
     st.subheader("1. 身份与凭证")
     
-    # 老师输入自己的手机号作为云端配置同步的专属账号
     def on_username_change():
         entered_name = st.session_state.get("input_username_widget", "").strip()
         if entered_name:
             st.session_state.username_key = entered_name
-            # 尝试从云端同步配置
             found = load_user_data_from_cloud(entered_name)
             if found:
                 st.toast(f"☁️ 账号 [{entered_name}] 的专属配置已从云端同步成功！", icon="🎉")
@@ -143,7 +143,6 @@ with st.sidebar:
         if token_input != st.session_state.token:
             st.session_state.token = token_input
 
-    # 如果在上方直接输入了打卡手机号，同步作为云端 Key
     if username_input and username_input != st.session_state.username_key:
         st.session_state.username_key = username_input
         load_user_data_from_cloud(username_input)
@@ -267,6 +266,7 @@ if st.session_state.btn_clicked:
             if err:
                 st.error(f"❌ 错误：{err}")
             elif reports:
+                save_user_data_to_cloud()
                 st.toast("🎉 打卡报告生成成功！配置已自动同步至云端！", icon="☁️")
                 
                 for idx, (c_name, c_content) in enumerate(reports.items()):
@@ -396,4 +396,4 @@ if st.session_state.btn_clicked:
                     
                     components.html(custom_copy_card, height=card_height)
 else:
-    st.info("👈 请在左侧边栏配置班级与规则，点击 **「⚡ 一键生成打卡报告」** 即可。")
+    st.info("👈 请在左侧边栏配置班级与规则，点击 **👤 老师手机号** 或 **「⚡ 一键生成打卡报告」** 即可自动存入云端。")
