@@ -4,7 +4,17 @@ import streamlit.components.v1 as components
 from datetime import date, timedelta
 from iread_core import auto_login, fetch_data_via_api, DEFAULT_TEMPLATE, DEFAULT_MATRIX_TEMPLATE
 
-# 🛑 核心杀招：如果发现 URL 带有任何多余参数，强行在第一次加载时清空它，让地址栏永远保持干净！
+# 尝试引入 Supabase 云端数据库客户端
+try:
+    from supabase import create_client, Client
+    SUPABASE_URL = "https://sxjdncrkkjcnkyozmbzo.supabase.co"
+    SUPABASE_KEY = "sb_publishable_PM_84SFDUCbhpiQLJjYT5w_cMziV-vt"
+    supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
+    has_supabase = True
+except Exception:
+    has_supabase = False
+
+# 🛑 核心清理：如果 URL 带有任何多余参数，强行在第一次加载时清空它
 if len(st.query_params) > 0:
     st.query_params.clear()
     st.rerun()
@@ -31,7 +41,9 @@ EMOJI_PRESETS = {
     "🏆 勋章荣誉": {"full": "🏆", "part": "🥇", "zero": "❌", "badge": "🎖️"}
 }
 
-# 🛡️ 纯 Session State 会话状态兜底初始化（绝不污染 URL）
+# 🛡️ 状态初始化
+if "username_key" not in st.session_state:
+    st.session_state.username_key = ""
 if "token" not in st.session_state:
     st.session_state.token = ""
 if "class_rules" not in st.session_state:
@@ -45,12 +57,54 @@ if "matrix_template" not in st.session_state:
 if "emojis" not in st.session_state:
     st.session_state.emojis = {"full": "⭐", "part": "✨", "zero": "⚪", "badge": "👑"}
 
+def load_user_data_from_cloud(username: str):
+    """从 Supabase 云端拉取该用户的专属配置"""
+    if not has_supabase or not username:
+        return False
+    try:
+        response = supabase.table("user_configs").select("config_json").eq("username", username).execute()
+        if response.data and len(response.data) > 0:
+            data = json.loads(response.data[0]["config_json"])
+            st.session_state.class_rules = data.get("class_rules", {})
+            st.session_state.name_maps = data.get("name_maps", {})
+            st.session_state.custom_template = data.get("custom_template", DEFAULT_TEMPLATE)
+            st.session_state.matrix_template = data.get("matrix_template", DEFAULT_MATRIX_TEMPLATE)
+            st.session_state.emojis = data.get("emojis", {"full": "⭐", "part": "✨", "zero": "⚪", "badge": "👑"})
+            return True
+    except Exception as e:
+        print(f"云端加载失败: {e}")
+    return False
+
+def save_user_data_to_cloud():
+    """将当前的配置自动同步到 Supabase 云端"""
+    if not has_supabase:
+        return
+    # 用手机号或者登录手机号作为云端唯一主键
+    u_name = st.session_state.get("username_key", "").strip()
+    if not u_name:
+        return
+    
+    payload_data = {
+        "class_rules": st.session_state.class_rules,
+        "name_maps": st.session_state.name_maps,
+        "custom_template": st.session_state.custom_template,
+        "matrix_template": st.session_state.matrix_template,
+        "emojis": st.session_state.emojis
+    }
+    try:
+        supabase.table("user_configs").upsert({
+            "username": u_name,
+            "config_json": json.dumps(payload_data, ensure_ascii=False)
+        }).execute()
+    except Exception as e:
+        print(f"云端同步失败: {e}")
+
 with st.sidebar:
     st.header("⚙️ 参数配置")
     
     if st.button("🧹 清空/重置所有配置", type="secondary", use_container_width=True):
-        # 彻底清空 URL 参数与所有状态
         st.query_params.clear()
+        st.session_state.username_key = ""
         st.session_state.token = ""
         st.session_state.class_rules = {}
         st.session_state.name_maps = {}
@@ -60,15 +114,39 @@ with st.sidebar:
         st.session_state.btn_clicked = False
         st.rerun()
 
-    st.subheader("1. 身份凭证")
+    st.subheader("1. 身份与凭证")
+    
+    # 老师输入自己的手机号作为云端配置同步的专属账号
+    def on_username_change():
+        entered_name = st.session_state.get("input_username_widget", "").strip()
+        if entered_name:
+            st.session_state.username_key = entered_name
+            # 尝试从云端同步配置
+            found = load_user_data_from_cloud(entered_name)
+            if found:
+                st.toast(f"☁️ 账号 [{entered_name}] 的专属配置已从云端同步成功！", icon="🎉")
+
+    st.text_input(
+        "老师手机号（用于云端同步配置）", 
+        value=st.session_state.username_key, 
+        placeholder="请输入您的手机号", 
+        key="input_username_widget",
+        on_change=on_username_change
+    )
+
     login_tab1, login_tab2 = st.tabs(["🔐 账号密码", "🔑 Token"])
     with login_tab1:
-        username_input = st.text_input("手机号")
-        password_input = st.text_input("密码", type="password")
+        username_input = st.text_input("打卡平台手机号", value=st.session_state.username_key)
+        password_input = st.text_input("打卡平台密码", type="password")
     with login_tab2:
         token_input = st.text_input("Token", value=st.session_state.token, type="password")
         if token_input != st.session_state.token:
             st.session_state.token = token_input
+
+    # 如果在上方直接输入了打卡手机号，同步作为云端 Key
+    if username_input and username_input != st.session_state.username_key:
+        st.session_state.username_key = username_input
+        load_user_data_from_cloud(username_input)
 
     st.subheader("2. 模式与时间选择")
     output_mode = st.radio("选择输出格式", ["🍓 矩阵式周打卡榜", "📋 传统分组文字汇总"], index=0)
@@ -90,6 +168,7 @@ with st.sidebar:
             selected_preset = st.selectbox("选择 Emoji 预设主题", list(EMOJI_PRESETS.keys()), index=2)
             if selected_preset != "自定义" and EMOJI_PRESETS[selected_preset]:
                 st.session_state.emojis = EMOJI_PRESETS[selected_preset]
+                save_user_data_to_cloud()
 
             st.markdown("**自定义 Emoji 标记：**")
             col_e1, col_e2 = st.columns(2)
@@ -101,12 +180,15 @@ with st.sidebar:
                 e_badge = st.text_input("满勤尾巴标记", value=st.session_state.emojis.get("badge", "👑"))
             
             st.session_state.emojis = {"full": e_full, "part": e_part, "zero": e_zero, "badge": e_badge}
+            save_user_data_to_cloud()
             
             st.markdown("**自定义矩阵模板：**")
             st.session_state.matrix_template = st.text_area("矩阵模板", value=st.session_state.matrix_template, height=180)
+            save_user_data_to_cloud()
         else:
             st.markdown("**自定义传统分组模板：**")
             st.session_state.custom_template = st.text_area("文字模板", value=st.session_state.custom_template, height=180)
+            save_user_data_to_cloud()
 
     st.subheader("4. ⚙️ 班级与映射管理")
     new_class_input = st.text_input("➕ 添加班级：", placeholder="例如：万达K12班")
@@ -114,6 +196,7 @@ with st.sidebar:
         if new_class_input and new_class_input not in st.session_state.class_rules:
             st.session_state.class_rules[new_class_input] = {"listen": 60, "anim": 15, "books": 2}
             st.session_state.name_maps[new_class_input] = ""
+            save_user_data_to_cloud()
             st.rerun()
 
     class_rules_config = {}
@@ -125,15 +208,18 @@ with st.sidebar:
                 del st.session_state.class_rules[c_name]
                 if c_name in st.session_state.name_maps:
                     del st.session_state.name_maps[c_name]
+                save_user_data_to_cloud()
                 st.rerun()
 
             def update_rule(c=c_name):
                 st.session_state.class_rules[c]["listen"] = st.session_state[f"l_{c}"]
                 st.session_state.class_rules[c]["anim"] = st.session_state[f"a_{c}"]
                 st.session_state.class_rules[c]["books"] = st.session_state[f"b_{c}"]
+                save_user_data_to_cloud()
 
             def update_map(c=c_name):
                 st.session_state.name_maps[c] = st.session_state[f"m_{c}"]
+                save_user_data_to_cloud()
 
             st.number_input("每日听音(分)", value=st.session_state.class_rules[c_name]["listen"], step=5, key=f"l_{c_name}", on_change=update_rule)
             st.number_input("每日动画(分)", value=st.session_state.class_rules[c_name]["anim"], step=5, key=f"a_{c_name}", on_change=update_rule)
@@ -148,6 +234,7 @@ with st.sidebar:
 
     if btn_generate:
         st.session_state.btn_clicked = True
+        save_user_data_to_cloud()
         st.rerun()
 
 if st.session_state.btn_clicked:
@@ -161,6 +248,7 @@ if st.session_state.btn_clicked:
             else:
                 final_token = login_token
                 st.session_state.token = login_token
+                save_user_data_to_cloud()
     else:
         final_token = st.session_state.token
 
@@ -179,7 +267,7 @@ if st.session_state.btn_clicked:
             if err:
                 st.error(f"❌ 错误：{err}")
             elif reports:
-                st.toast("🎉 打卡报告生成成功！点击下方按钮即可复制/分享！", icon="✅")
+                st.toast("🎉 打卡报告生成成功！配置已自动同步至云端！", icon="☁️")
                 
                 for idx, (c_name, c_content) in enumerate(reports.items()):
                     st.markdown(f"### 📍 {c_name} 打卡报告")
