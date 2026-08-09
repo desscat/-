@@ -11,7 +11,7 @@ try:
     SUPABASE_KEY = "sb_publishable_PM_84SFDUCbhpiQLJjYT5w_cMziV-vt"
     supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
     has_supabase = True
-except Exception as e:
+except Exception:
     has_supabase = False
 
 # 🛑 核心清理：如果 URL 带有任何多余参数，强行在第一次加载时清空它
@@ -72,17 +72,20 @@ def load_user_data_from_cloud(username: str):
             st.session_state.emojis = data.get("emojis", {"full": "⭐", "part": "✨", "zero": "⚪", "badge": "👑"})
             return True
     except Exception as e:
-        st.error(f"云端加载出错: {e}")
+        print(f"云端加载失败: {e}")
     return False
 
-def save_user_data_to_cloud():
-    """将当前的配置自动同步到 Supabase 云端"""
+def save_user_data_to_cloud(show_toast=True):
+    """将当前的配置同步到 Supabase 云端"""
     if not has_supabase:
-        st.warning("⚠️ 未检测到 Supabase 客户端初始化！")
+        if show_toast:
+            st.warning("⚠️ 未检测到 Supabase 客户端初始化！")
         return
     
     u_name = st.session_state.get("username_key", "").strip()
     if not u_name:
+        if show_toast:
+            st.warning("⚠️ 请先在上方输入老师手机号，再进行保存！")
         return
     
     payload_data = {
@@ -93,13 +96,15 @@ def save_user_data_to_cloud():
         "emojis": st.session_state.emojis
     }
     try:
-        res = supabase.table("user_configs").upsert({
+        supabase.table("user_configs").upsert({
             "username": u_name,
             "config_json": json.dumps(payload_data, ensure_ascii=False)
         }).execute()
-        st.toast("☁️ 成功同步到云端数据库！", icon="🚀")
+        if show_toast:
+            st.toast("☁️ 专属配置已成功保存到云端！", icon="🎉")
     except Exception as e:
-        st.error(f"❌ 云端同步失败详情: {e}")
+        if show_toast:
+            st.error(f"❌ 云端同步失败: {e}")
 
 with st.sidebar:
     st.header("⚙️ 参数配置")
@@ -167,7 +172,6 @@ with st.sidebar:
             selected_preset = st.selectbox("选择 Emoji 预设主题", list(EMOJI_PRESETS.keys()), index=2)
             if selected_preset != "自定义" and EMOJI_PRESETS[selected_preset]:
                 st.session_state.emojis = EMOJI_PRESETS[selected_preset]
-                save_user_data_to_cloud()
 
             st.markdown("**自定义 Emoji 标记：**")
             col_e1, col_e2 = st.columns(2)
@@ -179,15 +183,12 @@ with st.sidebar:
                 e_badge = st.text_input("满勤尾巴标记", value=st.session_state.emojis.get("badge", "👑"))
             
             st.session_state.emojis = {"full": e_full, "part": e_part, "zero": e_zero, "badge": e_badge}
-            save_user_data_to_cloud()
             
             st.markdown("**自定义矩阵模板：**")
             st.session_state.matrix_template = st.text_area("矩阵模板", value=st.session_state.matrix_template, height=180)
-            save_user_data_to_cloud()
         else:
             st.markdown("**自定义传统分组模板：**")
             st.session_state.custom_template = st.text_area("文字模板", value=st.session_state.custom_template, height=180)
-            save_user_data_to_cloud()
 
     st.subheader("4. ⚙️ 班级与映射管理")
     new_class_input = st.text_input("➕ 添加班级：", placeholder="例如：万达K12班")
@@ -195,7 +196,6 @@ with st.sidebar:
         if new_class_input and new_class_input not in st.session_state.class_rules:
             st.session_state.class_rules[new_class_input] = {"listen": 60, "anim": 15, "books": 2}
             st.session_state.name_maps[new_class_input] = ""
-            save_user_data_to_cloud()
             st.rerun()
 
     class_rules_config = {}
@@ -207,33 +207,27 @@ with st.sidebar:
                 del st.session_state.class_rules[c_name]
                 if c_name in st.session_state.name_maps:
                     del st.session_state.name_maps[c_name]
-                save_user_data_to_cloud()
                 st.rerun()
 
-            def update_rule(c=c_name):
-                st.session_state.class_rules[c]["listen"] = st.session_state[f"l_{c}"]
-                st.session_state.class_rules[c]["anim"] = st.session_state[f"a_{c}"]
-                st.session_state.class_rules[c]["books"] = st.session_state[f"b_{c}"]
-                save_user_data_to_cloud()
-
-            def update_map(c=c_name):
-                st.session_state.name_maps[c] = st.session_state[f"m_{c}"]
-                save_user_data_to_cloud()
-
-            st.number_input("每日听音(分)", value=st.session_state.class_rules[c_name]["listen"], step=5, key=f"l_{c_name}", on_change=update_rule)
-            st.number_input("每日动画(分)", value=st.session_state.class_rules[c_name]["anim"], step=5, key=f"a_{c_name}", on_change=update_rule)
-            st.number_input("每日绘本(本)", value=st.session_state.class_rules[c_name]["books"], step=1, key=f"b_{c_name}", on_change=update_rule)
-            st.text_area("姓名映射 (中文:英文)", value=st.session_state.name_maps.get(c_name, ""), key=f"m_{c_name}", height=60, on_change=update_map)
+            st.session_state.class_rules[c_name]["listen"] = st.number_input("每日听音(分)", value=st.session_state.class_rules[c_name]["listen"], step=5, key=f"l_{c_name}")
+            st.session_state.class_rules[c_name]["anim"] = st.number_input("每日动画(分)", value=st.session_state.class_rules[c_name]["anim"], step=5, key=f"a_{c_name}")
+            st.session_state.class_rules[c_name]["books"] = st.session_state.class_rules[c_name]["books"] = st.number_input("每日绘本(本)", value=st.session_state.class_rules[c_name]["books"], step=1, key=f"b_{c_name}")
+            st.session_state.name_maps[c_name] = st.text_area("姓名映射 (中文:英文)", value=st.session_state.name_maps.get(c_name, ""), key=f"m_{c_name}", height=60)
 
         class_rules_config[c_name] = st.session_state.class_rules[c_name]
         name_maps_config[c_name] = st.session_state.name_maps.get(c_name, "")
 
     st.divider()
+    
+    # 💾 手动保存按钮
+    if st.button("💾 手动保存当前配置到云端", type="secondary", use_container_width=True):
+        save_user_data_to_cloud(show_toast=True)
+
     btn_generate = st.button("⚡ 一键生成打卡报告", type="primary", use_container_width=True)
 
     if btn_generate:
         st.session_state.btn_clicked = True
-        save_user_data_to_cloud()
+        save_user_data_to_cloud(show_toast=False) # 生成时静默同步
         st.rerun()
 
 if st.session_state.btn_clicked:
@@ -247,7 +241,7 @@ if st.session_state.btn_clicked:
             else:
                 final_token = login_token
                 st.session_state.token = login_token
-                save_user_data_to_cloud()
+                save_user_data_to_cloud(show_toast=True)
     else:
         final_token = st.session_state.token
 
@@ -266,8 +260,7 @@ if st.session_state.btn_clicked:
             if err:
                 st.error(f"❌ 错误：{err}")
             elif reports:
-                save_user_data_to_cloud()
-                st.toast("🎉 打卡报告生成成功！配置已自动同步至云端！", icon="☁️")
+                st.toast("🎉 打卡报告生成成功！", icon="🚀")
                 
                 for idx, (c_name, c_content) in enumerate(reports.items()):
                     st.markdown(f"### 📍 {c_name} 打卡报告")
@@ -396,4 +389,4 @@ if st.session_state.btn_clicked:
                     
                     components.html(custom_copy_card, height=card_height)
 else:
-    st.info("👈 请在左侧边栏配置班级与规则，点击 **👤 老师手机号** 或 **「⚡ 一键生成打卡报告」** 即可自动存入云端。")
+    st.info("👈 请在左侧边栏配置班级与规则，点击 **「💾 手动保存当前配置到云端」** 或 **「⚡ 一键生成打卡报告」** 即可。")
