@@ -131,7 +131,7 @@ def fetch_data_via_api(auth_token, report_type, start_date, end_date, class_rule
 
                 all_days_students_map = {}
 
-                # 按天严格遍历从 start_date 到 end_date (昨天)
+                # 按天严格遍历从 start_date 到 end_date
                 for day_idx in range(days_to_fetch):
                     curr_date = (start_date + timedelta(days=day_idx)).strftime("%Y-%m-%d")
                     stats_url = f"https://v2.ireadabc.com/api/v3/reports/statistics/class/{class_id}"
@@ -169,11 +169,12 @@ def fetch_data_via_api(auth_token, report_type, start_date, end_date, class_rule
 
                 matrix_lines = []
                 total_students = len(all_days_students_map)
-                full_attendance_count = 0  # 每天都有打卡
-                effort_count = 0           # 有打卡但有断开
-                zero_attendance_count = 0  # 完全没打卡
+                full_attendance_count = 0  
+                effort_count = 0           
+                zero_attendance_count = 0  
 
                 full_icon = emoji_config.get("full", "🍓")
+                part_icon = emoji_config.get("part", "✅")
                 zero_icon = emoji_config.get("zero", "🚫")
 
                 for s_name, emojis in all_days_students_map.items():
@@ -183,17 +184,19 @@ def fetch_data_via_api(auth_token, report_type, start_date, end_date, class_rule
                     line = f"{''.join(emojis)}  {s_name}"
                     
                     full_count_in_row = emojis.count(full_icon)
+                    part_count_in_row = emojis.count(part_icon)
                     zero_count_in_row = emojis.count(zero_icon)
                     
-                    # 💡 依照新规则判定统计人数：
+                    # 💡 严谨判定逻辑：
                     # 1. 未打卡提醒：完全没打卡（全都是 zero_icon）
                     if zero_count_in_row == days_to_fetch:
                         zero_attendance_count += 1
-                    # 2. 全勤达标：只要每天都有打卡（没有一天是 zero_icon）
+                    # 2. 全勤达标：每天都有打卡（没有一天是 zero_icon）
                     elif zero_count_in_row == 0:
                         full_attendance_count += 1
                         
-                        # 💡 勋章/奖杯标记：只有“每天都完全达标（全是🍓）”的人才有！
+                        # 💡 核心修复：只有当“每一天都完全满分（full_count 等于总天数）”时，才加奖杯！
+                        # 如果中间有一天是部分完成（part_icon），哪怕天天打卡，也不会被加上这个奖杯。
                         if full_count_in_row == days_to_fetch and emoji_config.get("badge"):
                             line += f" {emoji_config.get('badge')}"
                     # 3. 持续加油：有打卡也有没打卡（夹杂着 zero_icon）
@@ -204,7 +207,6 @@ def fetch_data_via_api(auth_token, report_type, start_date, end_date, class_rule
 
                 attendance_rate = round((full_attendance_count / total_students * 100), 1) if total_students > 0 else 0.0
 
-                # 💡 组装符合新逻辑的学情统计汇总文案
                 stats_text = f"""📊 学情统计汇总：
 🏆 全勤达标：{full_attendance_count} 人 ({attendance_rate}%)
 💪 持续加油：{effort_count} 人
