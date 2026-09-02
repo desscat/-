@@ -171,21 +171,38 @@ def fetch_data_via_api(auth_token, report_type, start_date, end_date, class_rule
                 matrix_lines = []
                 total_students = len(all_days_students_map)
                 full_attendance_count = 0
+                effort_count = 0
+                zero_attendance_count = 0
+
+                full_icon = emoji_config.get("full", "🍓")
+                zero_icon = emoji_config.get("zero", "🚫")
 
                 for s_name, emojis in all_days_students_map.items():
                     while len(emojis) < days_to_fetch:
-                        emojis.append(emoji_config.get("zero", "🚫"))
+                        emojis.append(zero_icon)
                         
                     line = f"{''.join(emojis)}  {s_name}"
-                    full_count_in_row = emojis.count(emoji_config.get("full", "🍓"))
+                    full_count_in_row = emojis.count(full_icon)
+                    zero_count_in_row = emojis.count(zero_icon)
                     
                     if days_to_fetch > 0 and full_count_in_row == days_to_fetch:
                         full_attendance_count += 1
                         if emoji_config.get("badge"):
                             line += f" {emoji_config.get('badge')}"
+                    elif zero_count_in_row == days_to_fetch:
+                        zero_attendance_count += 1
+                    else:
+                        effort_count += 1
+
                     matrix_lines.append(line)
 
                 attendance_rate = round((full_attendance_count / total_students * 100), 1) if total_students > 0 else 0.0
+
+                # 💡 重新组装完整的学情统计汇总文案
+                stats_text = f"""📊 学情统计汇总：
+🏆 全勤达标：{full_attendance_count} 人 ({attendance_rate}%)
+💪 持续加油：{effort_count} 人
+⚠️ 未打卡提醒：{zero_attendance_count} 人"""
 
                 curr_matrix_template = template_str if "{matrix}" in template_str else DEFAULT_MATRIX_TEMPLATE
 
@@ -195,7 +212,7 @@ def fetch_data_via_api(auth_token, report_type, start_date, end_date, class_rule
                     total_students=total_students,
                     full_attendance_count=full_attendance_count,
                     attendance_rate=attendance_rate,
-                    stats="{stats}" 
+                    stats=stats_text 
                 )
 
             return reports_dict, None
@@ -278,7 +295,7 @@ def fetch_data_via_api(auth_token, report_type, start_date, end_date, class_rule
                     date_title=date_title,
                     glory_list="\n".join(glory_lines) if glory_lines else "无",
                     effort_list="\n".join(effort_lines) if effort_lines else "无",
-                    zero_list="\n".join(zero_lines) if zero_lines else "无"
+                    zero_lines="\n".join(zero_lines) if zero_lines else "无"
                 )
 
         return reports_dict, None
