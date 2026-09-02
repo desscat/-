@@ -182,16 +182,19 @@ def fetch_data_via_api(auth_token, report_type, start_date, end_date, class_rule
                         
                     line = f"{''.join(emojis)}  {s_name}"
                     
+                    full_count_in_row = emojis.count(full_icon)
                     zero_count_in_row = emojis.count(zero_icon)
                     
-                    # 💡 依照新规则判定：
+                    # 💡 依照新规则判定统计人数：
                     # 1. 未打卡提醒：完全没打卡（全都是 zero_icon）
                     if zero_count_in_row == days_to_fetch:
                         zero_attendance_count += 1
                     # 2. 全勤达标：只要每天都有打卡（没有一天是 zero_icon）
                     elif zero_count_in_row == 0:
                         full_attendance_count += 1
-                        if emoji_config.get("badge"):
+                        
+                        # 💡 勋章/奖杯标记：只有“每天都完全达标（全是🍓）”的人才有！
+                        if full_count_in_row == days_to_fetch and emoji_config.get("badge"):
                             line += f" {emoji_config.get('badge')}"
                     # 3. 持续加油：有打卡也有没打卡（夹杂着 zero_icon）
                     else:
