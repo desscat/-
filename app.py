@@ -158,15 +158,19 @@ with st.sidebar:
     st.subheader("2. 模式与时间选择")
     output_mode = st.radio("选择输出格式", ["🍓 矩阵式周打卡榜", "📋 传统分组文字汇总"], index=0)
     
-    # 🎯 核心日期计算逻辑：
-    # 1. 无论哪一天运行，结束日期一律锁定为「昨天」
-    # 2. 如果今天为周一（today.weekday() == 0），昨天即为上周日，算出来的周一即为上周一（统计完整上周）
-    # 3. 如果今天是周二至周日，昨天即为本周内某天，算出来的周一即为本周一（统计本周一至昨天）
+    # 🎯 严丝合缝的日期计算逻辑：
+    # 1. 结束日期一律锁定为「昨天」
+    # 2. 如果今天是周一：昨天是周日，统计范围为【上周一 到 上周日】
+    # 3. 如果今天是周二至周日：统计范围为【本周一 到 昨天】
     today = date.today()
     yesterday = today - timedelta(days=1)
     
-    calc_start_date = yesterday - timedelta(days=yesterday.weekday())
-    calc_end_date = yesterday
+    if today.weekday() == 0:
+        calc_end_date = yesterday
+        calc_start_date = yesterday - timedelta(days=6)
+    else:
+        calc_end_date = yesterday
+        calc_start_date = yesterday - timedelta(days=yesterday.weekday())
 
     if output_mode == "🍓 矩阵式周打卡榜":
         st.caption(f"💡 矩阵模式：自动统计区间为 **{calc_start_date} 至 {calc_end_date}**")
@@ -383,4 +387,4 @@ if st.session_state.btn_clicked:
                     
                     components.html(custom_copy_card, height=card_height)
 else:
-    st.info("👈 请在左侧边栏配置班级与规则，点击 **「💾 手动保存当前配置到云端」** 或 **「⚡ 一键生成打卡报告」** 即可。")
+    st.info("👈 请在左侧边栏配置班级与规则，点击 **〈💾 手动保存当前配置到云端〉** 或 **〈⚡ 一键生成打卡报告〉** 即可。")
