@@ -155,31 +155,37 @@ with st.sidebar:
     st.subheader("2. 模式与时间选择")
     output_mode = st.radio("选择输出格式", ["🍓 矩阵式周打卡榜", "📋 传统分组文字汇总"], index=0)
     
-    # 🕒 调整日期逻辑：将“本周一至今天”改为“本周一至昨天”（防止当天未完成时产生数据偏差或满足汇报昨天的需求）
-    yesterday = date.today() - timedelta(days=1)
+    # 🕒 基础日期基准：昨天
+    today = date.today()
+    yesterday = today - timedelta(days=1)
     
     if output_mode == "🍓 矩阵式周打卡榜":
         st.caption("💡 矩阵模式：自动统计本周一至昨天的每日打卡情况，实时生成 Emoji 矩阵。")
         report_type = "周汇报"
         
-        # 计算本周一的日期
-        start_of_week = yesterday - timedelta(days=yesterday.weekday())
-        # 如果今天是周一，昨天的周一可能跨周，安全起见保证 start_date 不大于 yesterday
-        if start_of_week > yesterday:
-            start_of_week = yesterday
+        # 计算本周一
+        start_of_week = today - timedelta(days=today.weekday())
+        
+        # 如果今天是周一，则计算上一周（上周一 至 昨天/上周日）
+        if today.weekday() == 0:
+            start_of_week = today - timedelta(days=7)
             
         start_date, end_date = start_of_week, yesterday
     else:
         report_type = st.radio("统计周期", ["昨日汇报", "周汇报", "月汇报", "自定义时间"])
         
-        # 默认值根据类型调整
         if report_type == "昨日汇报":
             start_date, end_date = yesterday, yesterday
-        else:
-            start_date, end_date = date.today() - timedelta(days=1), date.today() - timedelta(days=1)
-            
-        if report_type == "自定义时间":
-            start_date = st.date_input("开始日期", value=date.today() - timedelta(days=7))
+        elif report_type == "周汇报":
+            start_of_week = today - timedelta(days=today.weekday())
+            if today.weekday() == 0:
+                start_of_week = today - timedelta(days=7)
+            start_date, end_date = start_of_week, yesterday
+        elif report_type == "月汇报":
+            start_of_month = date(today.year, today.month, 1)
+            start_date, end_date = start_of_month, yesterday
+        else: # 自定义时间
+            start_date = st.date_input("开始日期", value=today - timedelta(days=7))
             end_date = st.date_input("结束日期", value=yesterday)
 
     st.subheader("3. 🎨 DIY 格式与 Emoji 主题")
