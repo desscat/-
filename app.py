@@ -128,7 +128,7 @@ with st.sidebar:
         entered_name = st.session_state.get("input_username_widget", "").strip()
         if entered_name:
             st.session_state.username_key = entered_name
-            st.session_state.token = "" # 🎯 账号切换时清空旧 Token
+            st.session_state.token = ""  # 账号切换时清空旧 Token
             found = load_user_data_from_cloud(entered_name)
             if found:
                 st.toast(f"☁️ 账号 [{entered_name}] 的专属配置已从云端同步成功！", icon="🎉")
@@ -152,24 +152,24 @@ with st.sidebar:
 
     if username_input and username_input != st.session_state.username_key:
         st.session_state.username_key = username_input
-        st.session_state.token = "" # 🎯 切换手机号清空旧 Token
+        st.session_state.token = ""
         load_user_data_from_cloud(username_input)
 
     st.subheader("2. 模式与时间选择")
     output_mode = st.radio("选择输出格式", ["🍓 矩阵式周打卡榜", "📋 传统分组文字汇总"], index=0)
     
+    # 🎯 核心日期计算逻辑：
+    # 1. 无论哪一天运行，结束日期一律锁定为「昨天」
+    # 2. 如果今天为周一（today.weekday() == 0），昨天即为上周日，算出来的周一即为上周一（统计完整上周）
+    # 3. 如果今天是周二至周日，昨天即为本周内某天，算出来的周一即为本周一（统计本周一至昨天）
     today = date.today()
     yesterday = today - timedelta(days=1)
-
-    if today.weekday() == 0:
-        calc_start_date = today - timedelta(days=7)
-        calc_end_date = yesterday
-    else:
-        calc_start_date = today - timedelta(days=today.weekday())
-        calc_end_date = yesterday
+    
+    calc_start_date = yesterday - timedelta(days=yesterday.weekday())
+    calc_end_date = yesterday
 
     if output_mode == "🍓 矩阵式周打卡榜":
-        st.caption("💡 矩阵模式：自动统计周一至昨天的每日打卡情况，实时生成 Emoji 矩阵。")
+        st.caption(f"💡 矩阵模式：自动统计区间为 **{calc_start_date} 至 {calc_end_date}**")
         report_type = "周汇报"
         start_date, end_date = calc_start_date, calc_end_date
     else:
@@ -182,8 +182,8 @@ with st.sidebar:
             start_date = today.replace(day=1)
             end_date = yesterday
         else:
-            start_date = st.date_input("开始日期", value=yesterday)
-            end_date = st.date_input("结束日期", value=yesterday)
+            start_date = st.date_input("开始日期", value=calc_start_date)
+            end_date = st.date_input("结束日期", value=calc_end_date)
 
     st.subheader("3. 🎨 DIY 格式与 Emoji 主题")
     with st.expander("✨ 点击展开/修改模板与 Emoji 主题", expanded=False):
