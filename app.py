@@ -8,6 +8,7 @@ from iread_core import auto_login, fetch_data_via_api, DEFAULT_TEMPLATE, DEFAULT
 try:
     from supabase import create_client, Client
     SUPABASE_URL = "https://sxjdncrkkjcnkyozmbzo.supabase.co"
+    # ⚠️ 请确保这里使用的是 Supabase 项目设置中的 anon_key（以 eyJhbG 开头的长字符串）
     SUPABASE_KEY = "sb_publishable_PM_84SFDUCbhpiQLJjYT5w_cMziV-vt"
     supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
     has_supabase = True
@@ -55,7 +56,7 @@ if "custom_template" not in st.session_state:
 if "matrix_template" not in st.session_state:
     st.session_state.matrix_template = DEFAULT_MATRIX_TEMPLATE
 if "emojis" not in st.session_state:
-    st.session_state.emojis = {"full": "⭐", "part": "✨", "zero": "⚪", "badge": "👑"}
+    st.session_state.emojis = {"full": "🏆", "part": "🥇", "zero": "❌", "badge": "🎖️"}
 
 def load_user_data_from_cloud(username: str):
     """从 Supabase 云端拉取该用户的专属配置"""
@@ -69,7 +70,7 @@ def load_user_data_from_cloud(username: str):
             st.session_state.name_maps = data.get("name_maps", {})
             st.session_state.custom_template = data.get("custom_template", DEFAULT_TEMPLATE)
             st.session_state.matrix_template = data.get("matrix_template", DEFAULT_MATRIX_TEMPLATE)
-            st.session_state.emojis = data.get("emojis", {"full": "⭐", "part": "✨", "zero": "⚪", "badge": "👑"})
+            st.session_state.emojis = data.get("emojis", {"full": "🏆", "part": "🥇", "zero": "❌", "badge": "🎖️"})
             return True
     except Exception as e:
         print(f"云端加载失败: {e}")
@@ -79,7 +80,7 @@ def save_user_data_to_cloud(show_toast=True):
     """将当前的配置同步到 Supabase 云端"""
     if not has_supabase:
         if show_toast:
-            st.warning("⚠️ 未检测到 Supabase 客户端初始化！")
+            st.warning("⚠️ 未检测到 Supabase 客户端初始化！请检查 SUPABASE_KEY 是否有效。")
         return
     
     u_name = st.session_state.get("username_key", "").strip()
@@ -117,7 +118,7 @@ with st.sidebar:
         st.session_state.name_maps = {}
         st.session_state.custom_template = DEFAULT_TEMPLATE
         st.session_state.matrix_template = DEFAULT_MATRIX_TEMPLATE
-        st.session_state.emojis = {"full": "⭐", "part": "✨", "zero": "⚪", "badge": "👑"}
+        st.session_state.emojis = {"full": "🏆", "part": "🥇", "zero": "❌", "badge": "🎖️"}
         st.session_state.btn_clicked = False
         st.rerun()
 
@@ -127,6 +128,7 @@ with st.sidebar:
         entered_name = st.session_state.get("input_username_widget", "").strip()
         if entered_name:
             st.session_state.username_key = entered_name
+            st.session_state.token = "" # 🎯 账号切换时清空旧 Token
             found = load_user_data_from_cloud(entered_name)
             if found:
                 st.toast(f"☁️ 账号 [{entered_name}] 的专属配置已从云端同步成功！", icon="🎉")
@@ -150,21 +152,21 @@ with st.sidebar:
 
     if username_input and username_input != st.session_state.username_key:
         st.session_state.username_key = username_input
+        st.session_state.token = "" # 🎯 切换手机号清空旧 Token
         load_user_data_from_cloud(username_input)
 
     st.subheader("2. 模式与时间选择")
     output_mode = st.radio("选择输出格式", ["🍓 矩阵式周打卡榜", "📋 传统分组文字汇总"], index=0)
     
-    # 🎯 计算周一至昨天的逻辑
     today = date.today()
     yesterday = today - timedelta(days=1)
 
-    if today.weekday() == 0:  # 今天是周一
-        calc_start_date = today - timedelta(days=7)  # 上周一
-        calc_end_date = yesterday                    # 上周日
-    else:                    # 今天是周二至周日
-        calc_start_date = today - timedelta(days=today.weekday())  # 本周一
-        calc_end_date = yesterday                                  # 昨天
+    if today.weekday() == 0:
+        calc_start_date = today - timedelta(days=7)
+        calc_end_date = yesterday
+    else:
+        calc_start_date = today - timedelta(days=today.weekday())
+        calc_end_date = yesterday
 
     if output_mode == "🍓 矩阵式周打卡榜":
         st.caption("💡 矩阵模式：自动统计周一至昨天的每日打卡情况，实时生成 Emoji 矩阵。")
@@ -186,18 +188,18 @@ with st.sidebar:
     st.subheader("3. 🎨 DIY 格式与 Emoji 主题")
     with st.expander("✨ 点击展开/修改模板与 Emoji 主题", expanded=False):
         if output_mode == "🍓 矩阵式周打卡榜":
-            selected_preset = st.selectbox("选择 Emoji 预设主题", list(EMOJI_PRESETS.keys()), index=4) # 默认选勋章荣誉
+            selected_preset = st.selectbox("选择 Emoji 预设主题", list(EMOJI_PRESETS.keys()), index=4)
             if selected_preset != "自定义" and EMOJI_PRESETS[selected_preset]:
                 st.session_state.emojis = EMOJI_PRESETS[selected_preset]
 
             st.markdown("**自定义 Emoji 标记：**")
             col_e1, col_e2 = st.columns(2)
             with col_e1:
-                e_full = st.text_input("全勤达标", value=st.session_state.emojis.get("full", "⭐"))
-                e_part = st.text_input("部分达标", value=st.session_state.emojis.get("part", "✨"))
+                e_full = st.text_input("全勤达标", value=st.session_state.emojis.get("full", "🏆"), key="e_full_input")
+                e_part = st.text_input("部分达标", value=st.session_state.emojis.get("part", "🥇"), key="e_part_input")
             with col_e2:
-                e_zero = st.text_input("未打卡", value=st.session_state.emojis.get("zero", "⚪"))
-                e_badge = st.text_input("满勤尾巴标记", value=st.session_state.emojis.get("badge", "👑"))
+                e_zero = st.text_input("未打卡", value=st.session_state.emojis.get("zero", "❌"), key="e_zero_input")
+                e_badge = st.text_input("满勤尾巴标记", value=st.session_state.emojis.get("badge", "🎖️"), key="e_badge_input")
             
             st.session_state.emojis = {"full": e_full, "part": e_part, "zero": e_zero, "badge": e_badge}
             
@@ -236,7 +238,6 @@ with st.sidebar:
 
     st.divider()
     
-    # 💾 手动保存按钮
     if st.button("💾 手动保存当前配置到云端", type="secondary", use_container_width=True):
         save_user_data_to_cloud(show_toast=True)
 
@@ -244,7 +245,7 @@ with st.sidebar:
 
     if btn_generate:
         st.session_state.btn_clicked = True
-        save_user_data_to_cloud(show_toast=False) # 生成时静默同步
+        save_user_data_to_cloud(show_toast=False)
         st.rerun()
 
 if st.session_state.btn_clicked:
@@ -258,7 +259,7 @@ if st.session_state.btn_clicked:
             else:
                 final_token = login_token
                 st.session_state.token = login_token
-                save_user_data_to_cloud(show_toast=True)
+                save_user_data_to_cloud(show_toast=False)
     else:
         final_token = st.session_state.token
 
@@ -269,7 +270,6 @@ if st.session_state.btn_clicked:
             mode_key = "matrix" if output_mode.startswith("🍓") else "traditional"
             curr_tmpl = st.session_state.matrix_template if mode_key == "matrix" else st.session_state.custom_template
             
-            # 🎯 说明：fetch_data_via_api 内部在渲染模版时直接基于每个人每日学习时长计算出精准学情汇总并填入 {stats}
             reports, err = fetch_data_via_api(
                 final_token, report_type, start_date, end_date, 
                 class_rules_config, name_maps_config, {"listen": 60, "anim": 15, "books": 2}, 
