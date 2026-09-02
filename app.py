@@ -155,16 +155,32 @@ with st.sidebar:
     st.subheader("2. 模式与时间选择")
     output_mode = st.radio("选择输出格式", ["🍓 矩阵式周打卡榜", "📋 传统分组文字汇总"], index=0)
     
+    # 🕒 调整日期逻辑：将“本周一至今天”改为“本周一至昨天”（防止当天未完成时产生数据偏差或满足汇报昨天的需求）
+    yesterday = date.today() - timedelta(days=1)
+    
     if output_mode == "🍓 矩阵式周打卡榜":
-        st.caption("💡 矩阵模式：自动统计本周一至今天的每日打卡情况，实时生成 Emoji 矩阵。")
+        st.caption("💡 矩阵模式：自动统计本周一至昨天的每日打卡情况，实时生成 Emoji 矩阵。")
         report_type = "周汇报"
-        start_date, end_date = date.today(), date.today()
+        
+        # 计算本周一的日期
+        start_of_week = yesterday - timedelta(days=yesterday.weekday())
+        # 如果今天是周一，昨天的周一可能跨周，安全起见保证 start_date 不大于 yesterday
+        if start_of_week > yesterday:
+            start_of_week = yesterday
+            
+        start_date, end_date = start_of_week, yesterday
     else:
         report_type = st.radio("统计周期", ["昨日汇报", "周汇报", "月汇报", "自定义时间"])
-        start_date, end_date = date.today(), date.today()
+        
+        # 默认值根据类型调整
+        if report_type == "昨日汇报":
+            start_date, end_date = yesterday, yesterday
+        else:
+            start_date, end_date = date.today() - timedelta(days=1), date.today() - timedelta(days=1)
+            
         if report_type == "自定义时间":
-            start_date = st.date_input("开始日期", value=date.today() - timedelta(days=1))
-            end_date = st.date_input("结束日期", value=date.today())
+            start_date = st.date_input("开始日期", value=date.today() - timedelta(days=7))
+            end_date = st.date_input("结束日期", value=yesterday)
 
     st.subheader("3. 🎨 DIY 格式与 Emoji 主题")
     with st.expander("✨ 点击展开/修改模板与 Emoji 主题", expanded=False):
@@ -211,7 +227,7 @@ with st.sidebar:
 
             st.session_state.class_rules[c_name]["listen"] = st.number_input("每日听音(分)", value=st.session_state.class_rules[c_name]["listen"], step=5, key=f"l_{c_name}")
             st.session_state.class_rules[c_name]["anim"] = st.number_input("每日动画(分)", value=st.session_state.class_rules[c_name]["anim"], step=5, key=f"a_{c_name}")
-            st.session_state.class_rules[c_name]["books"] = st.session_state.class_rules[c_name]["books"] = st.number_input("每日绘本(本)", value=st.session_state.class_rules[c_name]["books"], step=1, key=f"b_{c_name}")
+            st.session_state.class_rules[c_name]["books"] = st.number_input("每日绘本(本)", value=st.session_state.class_rules[c_name]["books"], step=1, key=f"b_{c_name}")
             st.session_state.name_maps[c_name] = st.text_area("姓名映射 (中文:英文)", value=st.session_state.name_maps.get(c_name, ""), key=f"m_{c_name}", height=60)
 
         class_rules_config[c_name] = st.session_state.class_rules[c_name]
