@@ -181,39 +181,59 @@ with st.sidebar:
 
     st.markdown("---")
     
-    # 高级配置 (含真正的云端保存按钮)
+    # 高级配置 (含修正后的添加班级逻辑)
     with st.expander("⚙️ 高级配置 (班级规则与姓名映射)", expanded=False):
         tab_rules, tab_maps, tab_tpls = st.tabs(["🎯 规则配置", "🔤 姓名映射", "📝 模板编辑"])
         
         with tab_rules:
-            new_c = st.text_input("➕ 添加班级名称：", placeholder="例如：康乐E4", key="new_c_input")
+            # 🎯 强行绑定组件 Key，确保能取到输入的文字
+            st.text_input("➕ 添加班级名称：", placeholder="例如：康乐E4", key="new_class_name_input")
+            
             if st.button("添加班级", use_container_width=True):
-                if new_c and new_c not in st.session_state.class_rules:
-                    st.session_state.class_rules[new_c] = {"listen": 20, "anim": 10, "books": 1}
-                    st.session_state.name_maps[new_c] = ""
-                    st.rerun()
+                target_add = st.session_state.get("new_class_name_input", "").strip()
+                if target_add:
+                    if target_add not in st.session_state.class_rules:
+                        st.session_state.class_rules[target_add] = {"listen": 20, "anim": 10, "books": 1}
+                        st.session_state.name_maps[target_add] = ""
+                        st.toast(f"✅ 已成功创建班级：{target_add}")
+                        st.rerun()  # 🎯 核心：强制重绘，使下方列表立马渲染出刚添加的班级选项
+                    else:
+                        st.warning("⚠️ 该班级已存在，无需重复添加！")
+                else:
+                    st.warning("⚠️ 请先在框内输入班级名称！")
 
-            for c_name in list(st.session_state.class_rules.keys()):
-                st.markdown(f"**📍 {c_name}**")
-                c_l = st.number_input("听音(分)", value=st.session_state.class_rules[c_name]["listen"], step=5, key=f"l_{c_name}")
-                c_a = st.number_input("动画(分)", value=st.session_state.class_rules[c_name]["anim"], step=5, key=f"a_{c_name}")
-                c_b = st.number_input("绘本(本)", value=st.session_state.class_rules[c_name]["books"], step=1, key=f"b_{c_name}")
-                st.session_state.class_rules[c_name] = {"listen": c_l, "anim": c_a, "books": c_b}
-                if st.button("❌ 删除此班级", key=f"del_{c_name}"):
-                    del st.session_state.class_rules[c_name]
-                    if c_name in st.session_state.name_maps:
-                        del st.session_state.name_maps[c_name]
-                    st.rerun()
+            st.markdown("---")
+
+            # 遍历并绘制现有的班级规则输入项
+            if not st.session_state.class_rules:
+                st.info("💡 暂无班级，请在上方输入班级名称并点击「添加班级」。")
+            else:
+                for c_name in list(st.session_state.class_rules.keys()):
+                    st.markdown(f"**📍 {c_name}**")
+                    c_l = st.number_input("听音(分)", value=st.session_state.class_rules[c_name]["listen"], step=5, key=f"l_{c_name}")
+                    c_a = st.number_input("动画(分)", value=st.session_state.class_rules[c_name]["anim"], step=5, key=f"a_{c_name}")
+                    c_b = st.number_input("绘本(本)", value=st.session_state.class_rules[c_name]["books"], step=1, key=f"b_{c_name}")
+                    st.session_state.class_rules[c_name] = {"listen": c_l, "anim": c_a, "books": c_b}
+                    
+                    if st.button(f"❌ 删除 {c_name}", key=f"del_{c_name}"):
+                        del st.session_state.class_rules[c_name]
+                        if c_name in st.session_state.name_maps:
+                            del st.session_state.name_maps[c_name]
+                        st.rerun()
+                    st.markdown("---")
 
         with tab_maps:
-            for c_name in list(st.session_state.class_rules.keys()):
-                st.markdown(f"**📍 {c_name} 映射**")
-                st.session_state.name_maps[c_name] = st.text_area(
-                    "中文:英文 (每行一个)", 
-                    value=st.session_state.name_maps.get(c_name, ""), 
-                    key=f"m_{c_name}", 
-                    height=80
-                )
+            if not st.session_state.class_rules:
+                st.info("💡 请先在「规则配置」中添加班级。")
+            else:
+                for c_name in list(st.session_state.class_rules.keys()):
+                    st.markdown(f"**📍 {c_name} 映射**")
+                    st.session_state.name_maps[c_name] = st.text_area(
+                        "中文:英文 (每行一个)", 
+                        value=st.session_state.name_maps.get(c_name, ""), 
+                        key=f"m_{c_name}", 
+                        height=80
+                    )
 
         with tab_tpls:
             if mode_key == "matrix":
@@ -222,7 +242,6 @@ with st.sidebar:
                 st.session_state.custom_template = st.text_area("传统模板", value=st.session_state.custom_template, height=140)
 
         st.markdown("---")
-        # 🎯 显式复原的云端保存按钮
         if st.button("💾 手动保存当前配置到云端", type="secondary", use_container_width=True):
             save_user_data_to_cloud(show_toast=True)
 
