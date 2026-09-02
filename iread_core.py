@@ -118,7 +118,6 @@ def fetch_data_via_api(auth_token, report_type, start_date, end_date, class_rule
     try:
         # 📅 矩阵日历模式
         if mode == "matrix":
-            # 🎯 修复关键点：直接接收来自 app.py 计算好的 start_date(周一) 和 end_date(昨天)
             days_to_fetch = max(1, (end_date - start_date).days + 1)
             date_title = f"{start_date.month}.{start_date.day}--{end_date.month}.{end_date.day}"
 
@@ -198,13 +197,17 @@ def fetch_data_via_api(auth_token, report_type, start_date, end_date, class_rule
 
                 attendance_rate = round((full_attendance_count / total_students * 100), 1) if total_students > 0 else 0.0
 
-                # 💡 重新组装完整的学情统计汇总文案
+                # 💡 组装完整的学情统计汇总文案
                 stats_text = f"""📊 学情统计汇总：
 🏆 全勤达标：{full_attendance_count} 人 ({attendance_rate}%)
 💪 持续加油：{effort_count} 人
 ⚠️ 未打卡提醒：{zero_attendance_count} 人"""
 
-                curr_matrix_template = template_str if "{matrix}" in template_str else DEFAULT_MATRIX_TEMPLATE
+                # 🎯 修复关键点：如果模板里没有 {stats}，则自动在末尾拼接或替换，确保统计数据一定能显示出来
+                if "{stats}" in template_str:
+                    curr_matrix_template = template_str
+                else:
+                    curr_matrix_template = template_str + "\n\n--------------------\n{stats}"
 
                 reports_dict[class_name] = curr_matrix_template.format(
                     date_title=date_title,
@@ -218,7 +221,6 @@ def fetch_data_via_api(auth_token, report_type, start_date, end_date, class_rule
             return reports_dict, None
 
         # 📋 传统文字分组模式
-        # 🎯 修复关键点：完全统一从 start_date 和 end_date 获取日期范围与天数
         s_date, e_date = start_date.strftime("%Y-%m-%d"), end_date.strftime("%Y-%m-%d")
         days_count = max(1, (end_date - start_date).days + 1)
         
@@ -295,7 +297,7 @@ def fetch_data_via_api(auth_token, report_type, start_date, end_date, class_rule
                     date_title=date_title,
                     glory_list="\n".join(glory_lines) if glory_lines else "无",
                     effort_list="\n".join(effort_lines) if effort_lines else "无",
-                    zero_lines="\n".join(zero_lines) if zero_lines else "无"
+                    zero_list="\n".join(zero_lines) if zero_lines else "无"
                 )
 
         return reports_dict, None
