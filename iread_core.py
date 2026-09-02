@@ -169,9 +169,9 @@ def fetch_data_via_api(auth_token, report_type, start_date, end_date, class_rule
 
                 matrix_lines = []
                 total_students = len(all_days_students_map)
-                full_attendance_count = 0
-                effort_count = 0
-                zero_attendance_count = 0
+                full_attendance_count = 0  # 每天都有打卡
+                effort_count = 0           # 有打卡但有断开
+                zero_attendance_count = 0  # 完全没打卡
 
                 full_icon = emoji_config.get("full", "🍓")
                 zero_icon = emoji_config.get("zero", "🚫")
@@ -181,15 +181,19 @@ def fetch_data_via_api(auth_token, report_type, start_date, end_date, class_rule
                         emojis.append(zero_icon)
                         
                     line = f"{''.join(emojis)}  {s_name}"
-                    full_count_in_row = emojis.count(full_icon)
+                    
                     zero_count_in_row = emojis.count(zero_icon)
                     
-                    if days_to_fetch > 0 and full_count_in_row == days_to_fetch:
+                    # 💡 依照新规则判定：
+                    # 1. 未打卡提醒：完全没打卡（全都是 zero_icon）
+                    if zero_count_in_row == days_to_fetch:
+                        zero_attendance_count += 1
+                    # 2. 全勤达标：只要每天都有打卡（没有一天是 zero_icon）
+                    elif zero_count_in_row == 0:
                         full_attendance_count += 1
                         if emoji_config.get("badge"):
                             line += f" {emoji_config.get('badge')}"
-                    elif zero_count_in_row == days_to_fetch:
-                        zero_attendance_count += 1
+                    # 3. 持续加油：有打卡也有没打卡（夹杂着 zero_icon）
                     else:
                         effort_count += 1
 
@@ -197,13 +201,12 @@ def fetch_data_via_api(auth_token, report_type, start_date, end_date, class_rule
 
                 attendance_rate = round((full_attendance_count / total_students * 100), 1) if total_students > 0 else 0.0
 
-                # 💡 组装完整的学情统计汇总文案
+                # 💡 组装符合新逻辑的学情统计汇总文案
                 stats_text = f"""📊 学情统计汇总：
 🏆 全勤达标：{full_attendance_count} 人 ({attendance_rate}%)
 💪 持续加油：{effort_count} 人
 ⚠️ 未打卡提醒：{zero_attendance_count} 人"""
 
-                # 🎯 修复关键点：如果模板里没有 {stats}，则自动在末尾拼接或替换，确保统计数据一定能显示出来
                 if "{stats}" in template_str:
                     curr_matrix_template = template_str
                 else:
