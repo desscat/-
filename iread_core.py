@@ -3,7 +3,7 @@ import requests
 import traceback
 from datetime import date, timedelta
 
-# 💡 完美适配你要求的传统汇报模板格式
+# 💡 传统汇报模板格式
 DEFAULT_TEMPLATE = """[以下为{date_title}的打卡情况]
 
 🏆 {class_name}
@@ -118,10 +118,11 @@ def fetch_data_via_api(auth_token, report_type, start_date, end_date, class_rule
     try:
         # 📅 矩阵日历模式
         if mode == "matrix":
-            today = date.today()
-            d_start = today - timedelta(days=today.weekday()) # 本周一
-            days_to_fetch = min(7, (today - d_start).days + 1)
-            d_end = d_start + timedelta(days=days_to_fetch - 1)
+            # 🔒 严禁超越 yesterday：精确使用外部传入的 start_date 和 end_date（只截取到昨天）
+            d_start = start_date
+            d_end = end_date
+            
+            days_to_fetch = max(1, (d_end - d_start).days + 1)
             date_title = f"{d_start.month}.{d_start.day}--{d_end.month}.{d_end.day}"
 
             for item in classes_data:
@@ -160,6 +161,10 @@ def fetch_data_via_api(auth_token, report_type, start_date, end_date, class_rule
                             anim = clean_num(s.get("animation") or s.get("anim") or s.get("animTime") or 0)
                             books = clean_num(s.get("grading") or s.get("read") or s.get("booksCount") or 0)
 
+                            # 🎯 三项打卡判定依据：
+                            # 1. 三项皆达到目标要求 -> 全勤 (full)
+                            # 2. 三项均为0 -> 未打卡 (zero)
+                            # 3. 做了部分但未三项全满 -> 持续加油/部分达标 (part)
                             if listen >= base_rule["listen"] and anim >= base_rule["anim"] and books >= base_rule["books"]:
                                 emoji = emoji_config.get("full", "🍓")
                             elif listen == 0 and anim == 0 and books == 0:
@@ -180,6 +185,7 @@ def fetch_data_via_api(auth_token, report_type, start_date, end_date, class_rule
                     line = f"{''.join(emojis)}  {s_name}"
                     full_count_in_row = emojis.count(emoji_config.get("full", "🍓"))
                     
+                    # 只有每天都获得全勤图标 (full) 的小朋友才给予尾巴徽章
                     if days_to_fetch > 0 and full_count_in_row == days_to_fetch:
                         full_attendance_count += 1
                         if emoji_config.get("badge"):
@@ -188,7 +194,6 @@ def fetch_data_via_api(auth_token, report_type, start_date, end_date, class_rule
 
                 attendance_rate = round((full_attendance_count / total_students * 100), 1) if total_students > 0 else 0.0
 
-                # 确保矩阵模式下使用的是 DEFAULT_MATRIX_TEMPLATE 格式
                 curr_matrix_template = template_str if "{matrix}" in template_str else DEFAULT_MATRIX_TEMPLATE
 
                 reports_dict[class_name] = curr_matrix_template.format(
@@ -202,32 +207,10 @@ def fetch_data_via_api(auth_token, report_type, start_date, end_date, class_rule
 
             return reports_dict, None
 
-        # 📋 传统文字分组模式（完美对应你截图中的新版详细格式）
-        days_count = 1
-        if report_type == "昨日汇报":
-            yest = date.today() - timedelta(days=1)
-            s_date = e_date = yest.strftime("%Y-%m-%d")
-            date_title = yest.strftime("%m月%d日")
-        elif report_type == "周汇报":
-            d_start = date.today() - timedelta(days=date.today().weekday())
-            d_end = date.today()
-            s_date, e_date = d_start.strftime("%Y-%m-%d"), d_end.strftime("%Y-%m-%d")
-            date_title = f"{s_date}至{e_date}"
-            days_count = (d_end - d_start).days + 1
-        elif report_type == "月汇报":
-            d_start = date.today().replace(day=1)
-            d_end = date.today()
-            s_date, e_date = d_start.strftime("%Y-%m-%d"), d_end.strftime("%Y-%m-%d")
-            date_title = f"{s_date}至{e_date}"
-            days_count = (d_end - d_start).days + 1
-        elif report_type == "自定义时间":
-            s_date, e_date = start_date.strftime("%Y-%m-%d"), end_date.strftime("%Y-%m-%d")
-            date_title = f"{s_date}至{e_date}" if s_date != e_date else start_date.strftime("%m月%d日")
-            days_count = max(1, (end_date - start_date).days + 1)
-        else:
-            yest = date.today() - timedelta(days=1)
-            s_date = e_date = yest.strftime("%Y-%m-%d")
-            date_title = yest.strftime("%m月%d日")
+        # 📋 传统文字分组模式
+        days_count = max(1, (end_date - start_date).days + 1)
+        s_date, e_date = start_date.strftime("%Y-%m-%d"), end_date.strftime("%Y-%m-%d")
+        date_title = f"{s_date}至{e_date}" if s_date != e_date else start_date.strftime("%m月%d日")
 
         for item in classes_data:
             class_id = str(item.get("id") or item.get("class_id") or item.get("classId"))
@@ -271,10 +254,10 @@ def fetch_data_via_api(auth_token, report_type, start_date, end_date, class_rule
                     is_anim = anim >= target_a
                     is_books = books >= target_b
 
-                    # 完全达标 -> 🌟 【今日光荣榜】
+                    # 三项全满 -> 🌟 【光荣榜】
                     if is_listen and is_anim and is_books:
                         glory_lines.append(f"{display_name} (听音{listen}min, 动画{anim}min, 绘本{books}本)")
-                    # 完全没打卡 -> ⏰ 【该起床打卡啦】
+                    # 完全没打卡 -> ⏰ 【未打卡】
                     elif listen == 0 and anim == 0 and books == 0:
                         zero_lines.append(display_name)
                     # 部分达标 -> 💪 【再努努力】
@@ -288,9 +271,8 @@ def fetch_data_via_api(auth_token, report_type, start_date, end_date, class_rule
                             diffs.append(f"绘本还缺{target_b - books}本")
                         
                         diff_str = ", ".join(diffs)
-                        effort_lines.append(f"{display_name}：已达标 (距离全勤还缺：{diff_str})")
+                        effort_lines.append(f"{display_name}：已打卡 (距离全勤还缺：{diff_str})")
 
-                # 强制使用我们定义好的新传统模板，防止被网页残留的旧模板污染
                 curr_traditional_template = template_str if "{glory_list}" in template_str else DEFAULT_TEMPLATE
 
                 reports_dict[class_name] = curr_traditional_template.format(
