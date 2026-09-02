@@ -6,7 +6,7 @@ import streamlit.components.v1 as components
 from datetime import date, timedelta
 from iread_core import auto_login, fetch_data_via_api, DEFAULT_TEMPLATE, DEFAULT_MATRIX_TEMPLATE
 
-# 尝试引入 Supabase 云端数据库客户端
+# ---------------- 1. Supabase 云端数据库初始化 ----------------
 try:
     from supabase import create_client, Client
     SUPABASE_URL = os.getenv("SUPABASE_URL", "https://sxjdncrkkjcnkyozmbzo.supabase.co")
@@ -16,7 +16,7 @@ try:
 except Exception:
     has_supabase = False
 
-# 🛑 核心清理：如果 URL 带有任何多余参数，强行在第一次加载时清空它
+# 🛑 首次加载清理多余 URL 参数
 if len(st.query_params) > 0:
     st.query_params.clear()
     st.rerun()
@@ -43,7 +43,7 @@ EMOJI_PRESETS = {
     "🚀 太空探索": {"full": "🚀", "part": "🛸", "zero": "🌑", "badge": "🌌"}
 }
 
-# 🛡️ 状态初始化
+# ---------------- 2. Session State 状态初始化 ----------------
 if "username_key" not in st.session_state:
     st.session_state.username_key = ""
 if "token" not in st.session_state:
@@ -59,8 +59,9 @@ if "matrix_template" not in st.session_state:
 if "emojis" not in st.session_state:
     st.session_state.emojis = {"full": "🥇", "part": "🏆", "zero": "❌", "badge": "👑"}
 
+# ---------------- 3. Supabase 数据库交互逻辑 ----------------
 def load_user_data_from_cloud(username: str):
-    """从 Supabase 云端拉取该用户的专属配置"""
+    """从 Supabase 云端拉取专属配置"""
     if not has_supabase or not username:
         return False
     try:
@@ -72,22 +73,23 @@ def load_user_data_from_cloud(username: str):
             st.session_state.custom_template = data.get("custom_template", DEFAULT_TEMPLATE)
             st.session_state.matrix_template = data.get("matrix_template", DEFAULT_MATRIX_TEMPLATE)
             st.session_state.emojis = data.get("emojis", {"full": "🥇", "part": "🏆", "zero": "❌", "badge": "👑"})
+            st.session_state.token = data.get("token", st.session_state.token)
             return True
     except Exception as e:
         print(f"云端加载失败: {e}")
     return False
 
 def save_user_data_to_cloud(show_toast=True):
-    """将当前的配置同步到 Supabase 云端"""
+    """手动/自动将配置同步写入 Supabase 数据库"""
     if not has_supabase:
         if show_toast:
-            st.warning("⚠️ 未检测到 Supabase 客户端初始化！")
+            st.warning("⚠️ 未检测到 Supabase 数据库连接！")
         return
     
     u_name = st.session_state.get("username_key", "").strip()
     if not u_name:
         if show_toast:
-            st.warning("⚠️ 请先在上方输入老师手机号，再进行保存！")
+            st.warning("⚠️ 请先在左侧输入手机号再保存！")
         return
     
     payload_data = {
@@ -95,7 +97,8 @@ def save_user_data_to_cloud(show_toast=True):
         "name_maps": st.session_state.name_maps,
         "custom_template": st.session_state.custom_template,
         "matrix_template": st.session_state.matrix_template,
-        "emojis": st.session_state.emojis
+        "emojis": st.session_state.emojis,
+        "token": st.session_state.token
     }
     try:
         supabase.table("user_configs").upsert({
@@ -103,12 +106,12 @@ def save_user_data_to_cloud(show_toast=True):
             "config_json": json.dumps(payload_data, ensure_ascii=False)
         }).execute()
         if show_toast:
-            st.toast("☁️ 专属配置已成功保存到云端！", icon="🎉")
+            st.toast("☁️ 专属配置已成功保存至 Supabase 云端！", icon="🎉")
     except Exception as e:
         if show_toast:
-            st.error(f"❌ 云端同步失败: {e}")
+            st.error(f"❌ 数据库写入失败: {e}")
 
-# ================= 侧边栏全部 UI 控制区 =================
+# ---------------- 4. 侧边栏全部 UI 控制区 ----------------
 with st.sidebar:
     st.header("⚙️ 系统设置 & 配置存储")
     
@@ -120,7 +123,7 @@ with st.sidebar:
             st.session_state.username_key = entered_name
             found = load_user_data_from_cloud(entered_name)
             if found:
-                st.toast(f"☁️ 账号 [{entered_name}] 的专属配置已从云端同步成功！", icon="🎉")
+                st.toast(f"☁️ 已成功从云端读取账号 [{entered_name}] 的配置！", icon="🎉")
 
     st.text_input(
         "手机号", 
@@ -153,7 +156,7 @@ with st.sidebar:
 
     st.markdown("---")
     
-    # 🎯 模式与时间范围
+    # 模式与时间范围
     output_mode = st.radio("选择汇报模式", ["矩阵日历模式 (matrix)", "传统分组模式 (traditional)"], index=0)
     mode_key = "matrix" if "matrix" in output_mode else "traditional"
 
@@ -162,14 +165,14 @@ with st.sidebar:
     today = date.today()
     yesterday = today - timedelta(days=1)
 
-    # 🎯 兼容周一特判逻辑
+    # 兼容周一特判
     if date_option == "本周 (周一至昨天)":
-        if today.weekday() == 0:  # 今天刚好是周一
-            start_date = today - timedelta(days=7)  # 上周一
-            end_date = yesterday                    # 上周日
+        if today.weekday() == 0:
+            start_date = today - timedelta(days=7)
+            end_date = yesterday
         else:
-            start_date = today - timedelta(days=today.weekday())  # 本周一
-            end_date = yesterday                                  # 昨天
+            start_date = today - timedelta(days=today.weekday())
+            end_date = yesterday
         report_type = "周汇报"
     else:
         report_type = "自定义时间"
@@ -178,7 +181,7 @@ with st.sidebar:
 
     st.markdown("---")
     
-    # 🎯 高级配置 (班级规则、姓名映射、模板)
+    # 高级配置 (含真正的云端保存按钮)
     with st.expander("⚙️ 高级配置 (班级规则与姓名映射)", expanded=False):
         tab_rules, tab_maps, tab_tpls = st.tabs(["🎯 规则配置", "🔤 姓名映射", "📝 模板编辑"])
         
@@ -218,12 +221,14 @@ with st.sidebar:
             else:
                 st.session_state.custom_template = st.text_area("传统模板", value=st.session_state.custom_template, height=140)
 
-        if st.button("💾 保存高级配置到云端", use_container_width=True):
+        st.markdown("---")
+        # 🎯 显式复原的云端保存按钮
+        if st.button("💾 手动保存当前配置到云端", type="secondary", use_container_width=True):
             save_user_data_to_cloud(show_toast=True)
 
     st.markdown("---")
     
-    # 🎯 图标设置
+    # 图标配置
     st.subheader("🎨 矩阵模式图标配置")
     selected_preset = st.selectbox("选择 Emoji 预设主题", list(EMOJI_PRESETS.keys()), index=1)
     if selected_preset != "自定义" and EMOJI_PRESETS[selected_preset]:
@@ -237,7 +242,7 @@ with st.sidebar:
 
     st.markdown("---")
     
-    # 🎯 按钮区域
+    # 操作按钮
     btn_generate = st.button("🚀 立即生成学情报告", type="primary", use_container_width=True)
 
     if btn_generate:
@@ -257,7 +262,7 @@ with st.sidebar:
         st.session_state.btn_clicked = False
         st.rerun()
 
-# ================= 主界面结果展示区 =================
+# ---------------- 5. 主界面结果呈现区 ----------------
 if st.session_state.btn_clicked:
     final_token = st.session_state.token
 
@@ -285,7 +290,6 @@ if st.session_state.btn_clicked:
                 for idx, (c_name, c_content) in enumerate(reports.items()):
                     st.markdown(f"### 📍 {c_name} 打卡报告")
                     
-                    # 强制纠正日期表头
                     c_content = re.sub(r'--\d+\.\d+', f'--{yesterday_str}', c_content)
 
                     lines = c_content.split('\n')
@@ -299,7 +303,6 @@ if st.session_state.btn_clicked:
                         parts = line_str.split()
                         if parts:
                             emojis_part = parts[0]
-                            # 🎯 精确全勤判定逻辑
                             if p_emoji not in emojis_part and z_emoji not in emojis_part and f_emoji in emojis_part:
                                 full_cnt += 1
                             elif f_emoji not in emojis_part and p_emoji not in emojis_part and z_emoji in emojis_part:
@@ -328,7 +331,6 @@ if st.session_state.btn_clicked:
                         .replace("${", "\\${")
                     )
                     
-                    # 微信端 HTML 分享卡片
                     custom_copy_card = f"""
                     <div style="background-color: #f8f9fa; border: 1px solid #e9ecef; border-radius: 8px; padding: 16px; font-family: monospace; position: relative;">
                         <div style="position: absolute; top: 10px; right: 10px; display: flex; gap: 8px;">
