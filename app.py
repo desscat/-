@@ -1,22 +1,21 @@
 import json
 import re
-import os
 import streamlit as st
 import streamlit.components.v1 as components
 from datetime import date, timedelta
 from iread_core import auto_login, fetch_data_via_api, DEFAULT_TEMPLATE, DEFAULT_MATRIX_TEMPLATE
 
-# ---------------- 1. Supabase 云端数据库初始化 ----------------
+# 尝试引入 Supabase 云端数据库客户端
 try:
     from supabase import create_client, Client
-    SUPABASE_URL = os.getenv("SUPABASE_URL", "https://sxjdncrkkjcnkyozmbzo.supabase.co")
-    SUPABASE_KEY = os.getenv("SUPABASE_KEY", "sb_publishable_PM_84SFDUCbhpiQLJjYT5w_cMziV-vt")
+    SUPABASE_URL = "https://sxjdncrkkjcnkyozmbzo.supabase.co"
+    SUPABASE_KEY = "sb_publishable_PM_84SFDUCbhpiQLJjYT5w_cMziV-vt"
     supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
     has_supabase = True
 except Exception:
     has_supabase = False
 
-# 🛑 首次加载清理多余 URL 参数
+# 🛑 核心清理：如果 URL 带有任何多余参数，强行在第一次加载时清空它
 if len(st.query_params) > 0:
     st.query_params.clear()
     st.rerun()
@@ -37,13 +36,13 @@ st.title("⚡ 全阅读学情打卡生成器")
 
 EMOJI_PRESETS = {
     "自定义": None,
-    "🏆 勋章荣誉": {"full": "🥇", "part": "🏆", "zero": "❌", "badge": "👑"},
-    "🌟 星光闪耀": {"full": "⭐", "part": "✨", "zero": "⚪", "badge": "👑"},
     "🍓 水果派对": {"full": "🍓", "part": "✅", "zero": "🚫", "badge": "✔️"},
-    "🚀 太空探索": {"full": "🚀", "part": "🛸", "zero": "🌑", "badge": "🌌"}
+    "🌟 星光闪耀": {"full": "⭐", "part": "✨", "zero": "⚪", "badge": "👑"},
+    "🚀 太空探索": {"full": "🚀", "part": "🛸", "zero": "🌑", "badge": "🌌"},
+    "🏆 勋章荣誉": {"full": "🏆", "part": "🥇", "zero": "❌", "badge": "🎖️"}
 }
 
-# ---------------- 2. Session State 状态初始化 ----------------
+# 🛡️ 状态初始化
 if "username_key" not in st.session_state:
     st.session_state.username_key = ""
 if "token" not in st.session_state:
@@ -57,11 +56,10 @@ if "custom_template" not in st.session_state:
 if "matrix_template" not in st.session_state:
     st.session_state.matrix_template = DEFAULT_MATRIX_TEMPLATE
 if "emojis" not in st.session_state:
-    st.session_state.emojis = {"full": "🥇", "part": "🏆", "zero": "❌", "badge": "👑"}
+    st.session_state.emojis = {"full": "⭐", "part": "✨", "zero": "⚪", "badge": "👑"}
 
-# ---------------- 3. Supabase 数据库交互逻辑 ----------------
 def load_user_data_from_cloud(username: str):
-    """从 Supabase 云端拉取专属配置"""
+    """从 Supabase 云端拉取该用户的专属配置"""
     if not has_supabase or not username:
         return False
     try:
@@ -72,24 +70,23 @@ def load_user_data_from_cloud(username: str):
             st.session_state.name_maps = data.get("name_maps", {})
             st.session_state.custom_template = data.get("custom_template", DEFAULT_TEMPLATE)
             st.session_state.matrix_template = data.get("matrix_template", DEFAULT_MATRIX_TEMPLATE)
-            st.session_state.emojis = data.get("emojis", {"full": "🥇", "part": "🏆", "zero": "❌", "badge": "👑"})
-            st.session_state.token = data.get("token", st.session_state.token)
+            st.session_state.emojis = data.get("emojis", {"full": "⭐", "part": "✨", "zero": "⚪", "badge": "👑"})
             return True
     except Exception as e:
         print(f"云端加载失败: {e}")
     return False
 
 def save_user_data_to_cloud(show_toast=True):
-    """手动/自动将配置同步写入 Supabase 数据库"""
+    """将当前的配置同步到 Supabase 云端"""
     if not has_supabase:
         if show_toast:
-            st.warning("⚠️ 未检测到 Supabase 数据库连接！")
+            st.warning("⚠️ 未检测到 Supabase 客户端初始化！")
         return
     
     u_name = st.session_state.get("username_key", "").strip()
     if not u_name:
         if show_toast:
-            st.warning("⚠️ 请先在左侧输入手机号再保存！")
+            st.warning("⚠️ 请先在上方输入老师手机号，再进行保存！")
         return
     
     payload_data = {
@@ -97,8 +94,7 @@ def save_user_data_to_cloud(show_toast=True):
         "name_maps": st.session_state.name_maps,
         "custom_template": st.session_state.custom_template,
         "matrix_template": st.session_state.matrix_template,
-        "emojis": st.session_state.emojis,
-        "token": st.session_state.token
+        "emojis": st.session_state.emojis
     }
     try:
         supabase.table("user_configs").upsert({
@@ -106,169 +102,14 @@ def save_user_data_to_cloud(show_toast=True):
             "config_json": json.dumps(payload_data, ensure_ascii=False)
         }).execute()
         if show_toast:
-            st.toast("☁️ 专属配置已成功保存至 Supabase 云端！", icon="🎉")
+            st.toast("☁️ 专属配置已成功保存到云端！", icon="🎉")
     except Exception as e:
         if show_toast:
-            st.error(f"❌ 数据库写入失败: {e}")
+            st.error(f"❌ 云端同步失败: {e}")
 
-# ---------------- 4. 侧边栏全部 UI 控制区 ----------------
 with st.sidebar:
-    st.header("⚙️ 系统设置 & 配置存储")
+    st.header("⚙️ 参数配置")
     
-    st.subheader("🔑 账号登录")
-    
-    def on_username_change():
-        entered_name = st.session_state.get("input_username_widget", "").strip()
-        if entered_name:
-            st.session_state.username_key = entered_name
-            found = load_user_data_from_cloud(entered_name)
-            if found:
-                st.toast(f"☁️ 已成功从云端读取账号 [{entered_name}] 的配置！", icon="🎉")
-
-    st.text_input(
-        "手机号", 
-        value=st.session_state.username_key, 
-        placeholder="请输入手机号", 
-        key="input_username_widget",
-        on_change=on_username_change
-    )
-    
-    password_input = st.text_input("密码", type="password")
-
-    if st.button("自动登录获取 Token", use_container_width=True):
-        u_val = st.session_state.get("input_username_widget", "").strip()
-        if u_val and password_input:
-            with st.spinner("🔑 正在登录..."):
-                t_code, err_msg = auto_login(u_val, password_input)
-                if err_msg:
-                    st.error(f"❌ 登录失败: {err_msg}")
-                else:
-                    st.session_state.token = t_code
-                    st.session_state.username_key = u_val
-                    save_user_data_to_cloud(show_toast=True)
-                    st.success("登录成功！Token 已自动填入并保存")
-        else:
-            st.warning("请填写手机号和密码")
-
-    token_input = st.text_input("Token (可手动粘贴)", value=st.session_state.token, type="password")
-    if token_input != st.session_state.token:
-        st.session_state.token = token_input
-
-    st.markdown("---")
-    
-    # 模式与时间范围
-    output_mode = st.radio("选择汇报模式", ["矩阵日历模式 (matrix)", "传统分组模式 (traditional)"], index=0)
-    mode_key = "matrix" if "matrix" in output_mode else "traditional"
-
-    date_option = st.radio("时间范围", ["本周 (周一至昨天)", "自定义日期"], index=0)
-
-    today = date.today()
-    yesterday = today - timedelta(days=1)
-
-    # 兼容周一特判
-    if date_option == "本周 (周一至昨天)":
-        if today.weekday() == 0:
-            start_date = today - timedelta(days=7)
-            end_date = yesterday
-        else:
-            start_date = today - timedelta(days=today.weekday())
-            end_date = yesterday
-        report_type = "周汇报"
-    else:
-        report_type = "自定义时间"
-        start_date = st.date_input("开始日期", value=today - timedelta(days=7))
-        end_date = st.date_input("结束日期", value=yesterday)
-
-    st.markdown("---")
-    
-    # 高级配置 (含修正后的添加班级逻辑)
-    with st.expander("⚙️ 高级配置 (班级规则与姓名映射)", expanded=False):
-        tab_rules, tab_maps, tab_tpls = st.tabs(["🎯 规则配置", "🔤 姓名映射", "📝 模板编辑"])
-        
-        with tab_rules:
-            # 🎯 强行绑定组件 Key，确保能取到输入的文字
-            st.text_input("➕ 添加班级名称：", placeholder="例如：康乐E4", key="new_class_name_input")
-            
-            if st.button("添加班级", use_container_width=True):
-                target_add = st.session_state.get("new_class_name_input", "").strip()
-                if target_add:
-                    if target_add not in st.session_state.class_rules:
-                        st.session_state.class_rules[target_add] = {"listen": 20, "anim": 10, "books": 1}
-                        st.session_state.name_maps[target_add] = ""
-                        st.toast(f"✅ 已成功创建班级：{target_add}")
-                        st.rerun()  # 🎯 核心：强制重绘，使下方列表立马渲染出刚添加的班级选项
-                    else:
-                        st.warning("⚠️ 该班级已存在，无需重复添加！")
-                else:
-                    st.warning("⚠️ 请先在框内输入班级名称！")
-
-            st.markdown("---")
-
-            # 遍历并绘制现有的班级规则输入项
-            if not st.session_state.class_rules:
-                st.info("💡 暂无班级，请在上方输入班级名称并点击「添加班级」。")
-            else:
-                for c_name in list(st.session_state.class_rules.keys()):
-                    st.markdown(f"**📍 {c_name}**")
-                    c_l = st.number_input("听音(分)", value=st.session_state.class_rules[c_name]["listen"], step=5, key=f"l_{c_name}")
-                    c_a = st.number_input("动画(分)", value=st.session_state.class_rules[c_name]["anim"], step=5, key=f"a_{c_name}")
-                    c_b = st.number_input("绘本(本)", value=st.session_state.class_rules[c_name]["books"], step=1, key=f"b_{c_name}")
-                    st.session_state.class_rules[c_name] = {"listen": c_l, "anim": c_a, "books": c_b}
-                    
-                    if st.button(f"❌ 删除 {c_name}", key=f"del_{c_name}"):
-                        del st.session_state.class_rules[c_name]
-                        if c_name in st.session_state.name_maps:
-                            del st.session_state.name_maps[c_name]
-                        st.rerun()
-                    st.markdown("---")
-
-        with tab_maps:
-            if not st.session_state.class_rules:
-                st.info("💡 请先在「规则配置」中添加班级。")
-            else:
-                for c_name in list(st.session_state.class_rules.keys()):
-                    st.markdown(f"**📍 {c_name} 映射**")
-                    st.session_state.name_maps[c_name] = st.text_area(
-                        "中文:英文 (每行一个)", 
-                        value=st.session_state.name_maps.get(c_name, ""), 
-                        key=f"m_{c_name}", 
-                        height=80
-                    )
-
-        with tab_tpls:
-            if mode_key == "matrix":
-                st.session_state.matrix_template = st.text_area("矩阵模板", value=st.session_state.matrix_template, height=140)
-            else:
-                st.session_state.custom_template = st.text_area("传统模板", value=st.session_state.custom_template, height=140)
-
-        st.markdown("---")
-        if st.button("💾 手动保存当前配置到云端", type="secondary", use_container_width=True):
-            save_user_data_to_cloud(show_toast=True)
-
-    st.markdown("---")
-    
-    # 图标配置
-    st.subheader("🎨 矩阵模式图标配置")
-    selected_preset = st.selectbox("选择 Emoji 预设主题", list(EMOJI_PRESETS.keys()), index=1)
-    if selected_preset != "自定义" and EMOJI_PRESETS[selected_preset]:
-        st.session_state.emojis = EMOJI_PRESETS[selected_preset]
-
-    full_in = st.text_input("全勤图标 (三项全满)", value=st.session_state.emojis.get("full", "🥇"))
-    part_in = st.text_input("部分达标图标 (加油)", value=st.session_state.emojis.get("part", "🏆"))
-    zero_in = st.text_input("未打卡图标", value=st.session_state.emojis.get("zero", "❌"))
-    badge_in = st.text_input("全勤尾巴徽章", value=st.session_state.emojis.get("badge", "👑"))
-    st.session_state.emojis = {"full": full_in, "part": part_in, "zero": zero_in, "badge": badge_in}
-
-    st.markdown("---")
-    
-    # 操作按钮
-    btn_generate = st.button("🚀 立即生成学情报告", type="primary", use_container_width=True)
-
-    if btn_generate:
-        st.session_state.btn_clicked = True
-        save_user_data_to_cloud(show_toast=False)
-        st.rerun()
-
     if st.button("🧹 清空/重置所有配置", type="secondary", use_container_width=True):
         st.query_params.clear()
         st.session_state.username_key = ""
@@ -277,23 +118,164 @@ with st.sidebar:
         st.session_state.name_maps = {}
         st.session_state.custom_template = DEFAULT_TEMPLATE
         st.session_state.matrix_template = DEFAULT_MATRIX_TEMPLATE
-        st.session_state.emojis = {"full": "🥇", "part": "🏆", "zero": "❌", "badge": "👑"}
+        st.session_state.emojis = {"full": "⭐", "part": "✨", "zero": "⚪", "badge": "👑"}
         st.session_state.btn_clicked = False
         st.rerun()
 
-# ---------------- 5. 主界面结果呈现区 ----------------
+    st.subheader("1. 身份与凭证")
+    
+    def on_username_change():
+        entered_name = st.session_state.get("input_username_widget", "").strip()
+        if entered_name:
+            st.session_state.username_key = entered_name
+            found = load_user_data_from_cloud(entered_name)
+            if found:
+                st.toast(f"☁️ 账号 [{entered_name}] 的专属配置已从云端同步成功！", icon="🎉")
+
+    st.text_input(
+        "老师手机号（用于云端同步配置）", 
+        value=st.session_state.username_key, 
+        placeholder="请输入您的手机号", 
+        key="input_username_widget",
+        on_change=on_username_change
+    )
+
+    login_tab1, login_tab2 = st.tabs(["🔐 账号密码", "🔑 Token"])
+    with login_tab1:
+        username_input = st.text_input("打卡平台手机号", value=st.session_state.username_key)
+        password_input = st.text_input("打卡平台密码", type="password")
+    with login_tab2:
+        token_input = st.text_input("Token", value=st.session_state.token, type="password")
+        if token_input != st.session_state.token:
+            st.session_state.token = token_input
+
+    if username_input and username_input != st.session_state.username_key:
+        st.session_state.username_key = username_input
+        load_user_data_from_cloud(username_input)
+
+    st.subheader("2. 模式与时间选择")
+    output_mode = st.radio("选择输出格式", ["🍓 矩阵式周打卡榜", "📋 传统分组文字汇总"], index=0)
+    
+    # 🎯 基础日期定义：统一将截止日期设为“昨天”
+    today = date.today()
+    yesterday = today - timedelta(days=1)
+
+    if output_mode == "🍓 矩阵式周打卡榜":
+        st.caption("💡 矩阵模式：自动统计周一至昨天的每日打卡情况，实时生成 Emoji 矩阵。")
+        report_type = "周汇报"
+        # 🎯 周一特判：周一查看时自动抓取上周一到昨天；非周一抓取本周一到昨天
+        if today.weekday() == 0:
+            start_date = today - timedelta(days=7)
+        else:
+            start_date = today - timedelta(days=today.weekday())
+        end_date = yesterday
+    else:
+        report_type = st.radio("统计周期", ["昨日汇报", "周汇报", "月汇报", "自定义时间"])
+        if report_type == "昨日汇报":
+            start_date, end_date = yesterday, yesterday
+        elif report_type == "周汇报":
+            if today.weekday() == 0:
+                start_date = today - timedelta(days=7)
+            else:
+                start_date = today - timedelta(days=today.weekday())
+            end_date = yesterday
+        elif report_type == "月汇报":
+            start_date = today.replace(day=1)
+            end_date = yesterday
+        else:  # 自定义时间
+            start_date = st.date_input("开始日期", value=today - timedelta(days=7))
+            end_date = st.date_input("结束日期", value=yesterday)
+
+    st.subheader("3. 🎨 DIY 格式与 Emoji 主题")
+    with st.expander("✨ 点击展开/修改模板与 Emoji 主题", expanded=False):
+        if output_mode == "🍓 矩阵式周打卡榜":
+            selected_preset = st.selectbox("选择 Emoji 预设主题", list(EMOJI_PRESETS.keys()), index=2)
+            if selected_preset != "自定义" and EMOJI_PRESETS[selected_preset]:
+                st.session_state.emojis = EMOJI_PRESETS[selected_preset]
+
+            st.markdown("**自定义 Emoji 标记：**")
+            col_e1, col_e2 = st.columns(2)
+            with col_e1:
+                e_full = st.text_input("全勤达标", value=st.session_state.emojis.get("full", "⭐"))
+                e_part = st.text_input("部分达标", value=st.session_state.emojis.get("part", "✨"))
+            with col_e2:
+                e_zero = st.text_input("未打卡", value=st.session_state.emojis.get("zero", "⚪"))
+                e_badge = st.text_input("满勤尾巴标记", value=st.session_state.emojis.get("badge", "👑"))
+            
+            st.session_state.emojis = {"full": e_full, "part": e_part, "zero": e_zero, "badge": e_badge}
+            
+            st.markdown("**自定义矩阵模板：**")
+            st.session_state.matrix_template = st.text_area("矩阵模板", value=st.session_state.matrix_template, height=180)
+        else:
+            st.markdown("**自定义传统分组模板：**")
+            st.session_state.custom_template = st.text_area("文字模板", value=st.session_state.custom_template, height=180)
+
+    st.subheader("4. ⚙️ 班级与映射管理")
+    new_class_input = st.text_input("➕ 添加班级：", placeholder="例如：万达K12班", key="new_class_input_key")
+    if st.button("添加班级", use_container_width=True):
+        target_class = st.session_state.get("new_class_input_key", "").strip()
+        if target_class and target_class not in st.session_state.class_rules:
+            st.session_state.class_rules[target_class] = {"listen": 60, "anim": 15, "books": 2}
+            st.session_state.name_maps[target_class] = ""
+            st.rerun()
+
+    class_rules_config = {}
+    name_maps_config = {}
+
+    for c_name in list(st.session_state.class_rules.keys()):
+        with st.expander(f"📍 {c_name}", expanded=False):
+            if st.button("❌ 删除此班级", key=f"del_{c_name}", type="secondary"):
+                del st.session_state.class_rules[c_name]
+                if c_name in st.session_state.name_maps:
+                    del st.session_state.name_maps[c_name]
+                st.rerun()
+
+            st.session_state.class_rules[c_name]["listen"] = st.number_input("每日听音(分)", value=st.session_state.class_rules[c_name]["listen"], step=5, key=f"l_{c_name}")
+            st.session_state.class_rules[c_name]["anim"] = st.number_input("每日动画(分)", value=st.session_state.class_rules[c_name]["anim"], step=5, key=f"a_{c_name}")
+            st.session_state.class_rules[c_name]["books"] = st.number_input("每日绘本(本)", value=st.session_state.class_rules[c_name]["books"], step=1, key=f"b_{c_name}")
+            st.session_state.name_maps[c_name] = st.text_area("姓名映射 (中文:英文)", value=st.session_state.name_maps.get(c_name, ""), key=f"m_{c_name}", height=60)
+
+        class_rules_config[c_name] = st.session_state.class_rules[c_name]
+        name_maps_config[c_name] = st.session_state.name_maps.get(c_name, "")
+
+    st.divider()
+    
+    # 💾 手动保存按钮
+    if st.button("💾 手动保存当前配置到云端", type="secondary", use_container_width=True):
+        save_user_data_to_cloud(show_toast=True)
+
+    btn_generate = st.button("⚡ 一键生成打卡报告", type="primary", use_container_width=True)
+
+    if btn_generate:
+        st.session_state.btn_clicked = True
+        save_user_data_to_cloud(show_toast=False)  # 生成时静默同步
+        st.rerun()
+
 if st.session_state.btn_clicked:
-    final_token = st.session_state.token
+    final_token = ""
+    if username_input and password_input:
+        with st.spinner("🔑 正在登录..."):
+            login_token, login_err = auto_login(username_input, password_input)
+            if login_err:
+                st.error(f"❌ 登录失败：{login_err}")
+                st.stop()
+            else:
+                final_token = login_token
+                st.session_state.token = login_token
+                save_user_data_to_cloud(show_toast=True)
+    else:
+        final_token = st.session_state.token
 
     if not final_token:
         st.warning("⚠️ 请先在左侧边栏填写账号密码或 Token！")
     else:
         with st.spinner("⚡ 正在抓取打卡数据并生成报告..."):
+            mode_key = "matrix" if output_mode.startswith("🍓") else "traditional"
             curr_tmpl = st.session_state.matrix_template if mode_key == "matrix" else st.session_state.custom_template
             
             reports, err = fetch_data_via_api(
                 final_token, report_type, start_date, end_date, 
-                st.session_state.class_rules, st.session_state.name_maps, {"listen": 20, "anim": 10, "books": 1}, 
+                class_rules_config, name_maps_config, {"listen": 60, "anim": 15, "books": 2}, 
                 curr_tmpl, mode=mode_key, emoji_config=st.session_state.emojis
             )
             if err:
@@ -301,24 +283,27 @@ if st.session_state.btn_clicked:
             elif reports:
                 st.toast("🎉 打卡报告生成成功！", icon="🚀")
                 
-                f_emoji = st.session_state.emojis.get("full", "🥇")
-                p_emoji = st.session_state.emojis.get("part", "🏆")
-                z_emoji = st.session_state.emojis.get("zero", "❌")
+                # 🎯 强制替换标题中的结束日期为昨天 (MM.DD 格式)
                 yesterday_str = end_date.strftime("%m.%d").lstrip("0").replace(".0", ".")
 
                 for idx, (c_name, c_content) in enumerate(reports.items()):
                     st.markdown(f"### 📍 {c_name} 打卡报告")
                     
+                    # 动态纠正文本头部如 `--04.14` 为修正后的截止日期
                     c_content = re.sub(r'--\d+\.\d+', f'--{yesterday_str}', c_content)
 
                     lines = c_content.split('\n')
-                    full_cnt, part_cnt, zero_cnt = 0, 0, 0
+                    f_emoji = st.session_state.emojis.get("full", "⭐")
+                    p_emoji = st.session_state.emojis.get("part", "✨")
+                    z_emoji = st.session_state.emojis.get("zero", "⚪")
                     
+                    full_cnt, part_cnt, zero_cnt = 0, 0, 0
                     for line in lines:
                         line_str = line.strip()
-                        if not line_str or "--" in line_str or "学情" in line_str or "提醒" in line_str or "全阅读" in line_str or "打卡" in line_str or "达标" in line_str:
+                        if not line_str or "--" in line_str or "学情" in line_str or "提醒" in line_str:
                             continue
                         
+                        # 兼容多类型图标统计
                         parts = line_str.split()
                         if parts:
                             emojis_part = parts[0]
@@ -439,6 +424,7 @@ if st.session_state.btn_clicked:
                     
                     line_count = len(final_share_content.split('\n'))
                     card_height = max(220, line_count * 24 + 80)
+                    
                     components.html(custom_copy_card, height=card_height)
 else:
-    st.info("👈 请在左侧边栏配置班级与规则，点击 **「🚀 立即生成学情报告」** 即可。")
+    st.info("👈 请在左侧边栏配置班级与规则，点击 **「💾 手动保存当前配置到云端」** 或 **「⚡ 一键生成打卡报告」** 即可。")
