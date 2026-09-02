@@ -186,7 +186,7 @@ with st.sidebar:
     st.subheader("3. 🎨 DIY 格式与 Emoji 主题")
     with st.expander("✨ 点击展开/修改模板与 Emoji 主题", expanded=False):
         if output_mode == "🍓 矩阵式周打卡榜":
-            selected_preset = st.selectbox("选择 Emoji 预设主题", list(EMOJI_PRESETS.keys()), index=2)
+            selected_preset = st.selectbox("选择 Emoji 预设主题", list(EMOJI_PRESETS.keys()), index=4) # 默认选勋章荣誉
             if selected_preset != "自定义" and EMOJI_PRESETS[selected_preset]:
                 st.session_state.emojis = EMOJI_PRESETS[selected_preset]
 
@@ -228,7 +228,7 @@ with st.sidebar:
 
             st.session_state.class_rules[c_name]["listen"] = st.number_input("每日听音(分)", value=st.session_state.class_rules[c_name]["listen"], step=5, key=f"l_{c_name}")
             st.session_state.class_rules[c_name]["anim"] = st.number_input("每日动画(分)", value=st.session_state.class_rules[c_name]["anim"], step=5, key=f"a_{c_name}")
-            st.session_state.class_rules[c_name]["books"] = st.session_state.class_rules[c_name]["books"] = st.number_input("每日绘本(本)", value=st.session_state.class_rules[c_name]["books"], step=1, key=f"b_{c_name}")
+            st.session_state.class_rules[c_name]["books"] = st.number_input("每日绘本(本)", value=st.session_state.class_rules[c_name]["books"], step=1, key=f"b_{c_name}")
             st.session_state.name_maps[c_name] = st.text_area("姓名映射 (中文:英文)", value=st.session_state.name_maps.get(c_name, ""), key=f"m_{c_name}", height=60)
 
         class_rules_config[c_name] = st.session_state.class_rules[c_name]
@@ -269,6 +269,7 @@ if st.session_state.btn_clicked:
             mode_key = "matrix" if output_mode.startswith("🍓") else "traditional"
             curr_tmpl = st.session_state.matrix_template if mode_key == "matrix" else st.session_state.custom_template
             
+            # 🎯 说明：fetch_data_via_api 内部在渲染模版时直接基于每个人每日学习时长计算出精准学情汇总并填入 {stats}
             reports, err = fetch_data_via_api(
                 final_token, report_type, start_date, end_date, 
                 class_rules_config, name_maps_config, {"listen": 60, "anim": 15, "books": 2}, 
@@ -282,46 +283,7 @@ if st.session_state.btn_clicked:
                 for idx, (c_name, c_content) in enumerate(reports.items()):
                     st.markdown(f"### 📍 {c_name} 打卡报告")
                     
-                    lines = c_content.split('\n')
-                    f_emoji = st.session_state.emojis.get("full", "⭐")
-                    p_emoji = st.session_state.emojis.get("part", "✨")
-                    z_emoji = st.session_state.emojis.get("zero", "⚪")
-                    
-                    full_cnt, part_cnt, zero_cnt = 0, 0, 0
-                    
-                    # 🎯 修复：基于“人员单行”来精准判断分类逻辑
-                    for line in lines:
-                        line_str = line.strip()
-                        # 过滤掉非学生行的干扰文本
-                        if not line_str or any(k in line_str for k in ["打卡", "----", "学情统计", "提醒："]):
-                            continue
-                        
-                        # 必须包含任何一种 Emoji 标记才算作学生打卡数据行
-                        if any(e in line_str for e in [f_emoji, p_emoji, z_emoji]):
-                            has_active = (f_emoji in line_str) or (p_emoji in line_str)
-                            has_zero = (z_emoji in line_str)
-                            
-                            if not has_zero and has_active:
-                                # 每天都有打卡记录（包含全勤或部分），无未打卡
-                                full_cnt += 1
-                            elif has_zero and has_active:
-                                # 既有打卡记录，又有未打卡记录
-                                part_cnt += 1
-                            elif has_zero and not has_active:
-                                # 完全没有打卡记录，全是未打卡图标
-                                zero_cnt += 1
-
-                    total_students = full_cnt + part_cnt + zero_cnt
-                    pct = round(full_cnt / total_students * 100) if total_students > 0 else 0
-                    
-                    stats_text = (
-                        f"📊 学情统计汇总：\n"
-                        f"🌟 全勤达标：{full_cnt} 人（{pct}%）\n"
-                        f"💪 持续加油：{part_cnt} 人\n"
-                        f"⚠️ 未打卡提醒：{zero_cnt} 人"
-                    )
-                    
-                    final_share_content = c_content.replace("{stats}", stats_text).strip()
+                    final_share_content = c_content.strip()
 
                     escaped_content = (
                         final_share_content.replace("\\", "\\\\")
