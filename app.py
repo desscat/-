@@ -288,13 +288,28 @@ if st.session_state.btn_clicked:
                     z_emoji = st.session_state.emojis.get("zero", "⚪")
                     
                     full_cnt, part_cnt, zero_cnt = 0, 0, 0
+                    
+                    # 🎯 修复：基于“人员单行”来精准判断分类逻辑
                     for line in lines:
-                        if f_emoji in line:
-                            full_cnt += 1
-                        elif p_emoji in line:
-                            part_cnt += 1
-                        elif z_emoji in line:
-                            zero_cnt += 1
+                        line_str = line.strip()
+                        # 过滤掉非学生行的干扰文本
+                        if not line_str or any(k in line_str for k in ["打卡", "----", "学情统计", "提醒："]):
+                            continue
+                        
+                        # 必须包含任何一种 Emoji 标记才算作学生打卡数据行
+                        if any(e in line_str for e in [f_emoji, p_emoji, z_emoji]):
+                            has_active = (f_emoji in line_str) or (p_emoji in line_str)
+                            has_zero = (z_emoji in line_str)
+                            
+                            if not has_zero and has_active:
+                                # 每天都有打卡记录（包含全勤或部分），无未打卡
+                                full_cnt += 1
+                            elif has_zero and has_active:
+                                # 既有打卡记录，又有未打卡记录
+                                part_cnt += 1
+                            elif has_zero and not has_active:
+                                # 完全没有打卡记录，全是未打卡图标
+                                zero_cnt += 1
 
                     total_students = full_cnt + part_cnt + zero_cnt
                     pct = round(full_cnt / total_students * 100) if total_students > 0 else 0
