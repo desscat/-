@@ -1,5 +1,4 @@
 import json
-import re
 import streamlit as st
 import streamlit.components.v1 as components
 from datetime import date, timedelta
@@ -156,34 +155,32 @@ with st.sidebar:
     st.subheader("2. 模式与时间选择")
     output_mode = st.radio("选择输出格式", ["🍓 矩阵式周打卡榜", "📋 传统分组文字汇总"], index=0)
     
-    # 🎯 基础日期定义：统一将截止日期设为“昨天”
+    # 🎯 计算周一至昨天的逻辑
     today = date.today()
     yesterday = today - timedelta(days=1)
+
+    if today.weekday() == 0:  # 今天是周一
+        calc_start_date = today - timedelta(days=7)  # 上周一
+        calc_end_date = yesterday                    # 上周日
+    else:                    # 今天是周二至周日
+        calc_start_date = today - timedelta(days=today.weekday())  # 本周一
+        calc_end_date = yesterday                                  # 昨天
 
     if output_mode == "🍓 矩阵式周打卡榜":
         st.caption("💡 矩阵模式：自动统计周一至昨天的每日打卡情况，实时生成 Emoji 矩阵。")
         report_type = "周汇报"
-        # 🎯 周一特判：周一查看时自动抓取上周一到昨天；非周一抓取本周一到昨天
-        if today.weekday() == 0:
-            start_date = today - timedelta(days=7)
-        else:
-            start_date = today - timedelta(days=today.weekday())
-        end_date = yesterday
+        start_date, end_date = calc_start_date, calc_end_date
     else:
         report_type = st.radio("统计周期", ["昨日汇报", "周汇报", "月汇报", "自定义时间"])
         if report_type == "昨日汇报":
             start_date, end_date = yesterday, yesterday
         elif report_type == "周汇报":
-            if today.weekday() == 0:
-                start_date = today - timedelta(days=7)
-            else:
-                start_date = today - timedelta(days=today.weekday())
-            end_date = yesterday
+            start_date, end_date = calc_start_date, calc_end_date
         elif report_type == "月汇报":
             start_date = today.replace(day=1)
             end_date = yesterday
-        else:  # 自定义时间
-            start_date = st.date_input("开始日期", value=today - timedelta(days=7))
+        else:
+            start_date = st.date_input("开始日期", value=yesterday)
             end_date = st.date_input("结束日期", value=yesterday)
 
     st.subheader("3. 🎨 DIY 格式与 Emoji 主题")
@@ -211,12 +208,11 @@ with st.sidebar:
             st.session_state.custom_template = st.text_area("文字模板", value=st.session_state.custom_template, height=180)
 
     st.subheader("4. ⚙️ 班级与映射管理")
-    new_class_input = st.text_input("➕ 添加班级：", placeholder="例如：万达K12班", key="new_class_input_key")
+    new_class_input = st.text_input("➕ 添加班级：", placeholder="例如：万达K12班")
     if st.button("添加班级", use_container_width=True):
-        target_class = st.session_state.get("new_class_input_key", "").strip()
-        if target_class and target_class not in st.session_state.class_rules:
-            st.session_state.class_rules[target_class] = {"listen": 60, "anim": 15, "books": 2}
-            st.session_state.name_maps[target_class] = ""
+        if new_class_input and new_class_input not in st.session_state.class_rules:
+            st.session_state.class_rules[new_class_input] = {"listen": 60, "anim": 15, "books": 2}
+            st.session_state.name_maps[new_class_input] = ""
             st.rerun()
 
     class_rules_config = {}
@@ -232,7 +228,7 @@ with st.sidebar:
 
             st.session_state.class_rules[c_name]["listen"] = st.number_input("每日听音(分)", value=st.session_state.class_rules[c_name]["listen"], step=5, key=f"l_{c_name}")
             st.session_state.class_rules[c_name]["anim"] = st.number_input("每日动画(分)", value=st.session_state.class_rules[c_name]["anim"], step=5, key=f"a_{c_name}")
-            st.session_state.class_rules[c_name]["books"] = st.number_input("每日绘本(本)", value=st.session_state.class_rules[c_name]["books"], step=1, key=f"b_{c_name}")
+            st.session_state.class_rules[c_name]["books"] = st.session_state.class_rules[c_name]["books"] = st.number_input("每日绘本(本)", value=st.session_state.class_rules[c_name]["books"], step=1, key=f"b_{c_name}")
             st.session_state.name_maps[c_name] = st.text_area("姓名映射 (中文:英文)", value=st.session_state.name_maps.get(c_name, ""), key=f"m_{c_name}", height=60)
 
         class_rules_config[c_name] = st.session_state.class_rules[c_name]
@@ -248,7 +244,7 @@ with st.sidebar:
 
     if btn_generate:
         st.session_state.btn_clicked = True
-        save_user_data_to_cloud(show_toast=False)  # 生成时静默同步
+        save_user_data_to_cloud(show_toast=False) # 生成时静默同步
         st.rerun()
 
 if st.session_state.btn_clicked:
@@ -283,15 +279,9 @@ if st.session_state.btn_clicked:
             elif reports:
                 st.toast("🎉 打卡报告生成成功！", icon="🚀")
                 
-                # 🎯 强制替换标题中的结束日期为昨天 (MM.DD 格式)
-                yesterday_str = end_date.strftime("%m.%d").lstrip("0").replace(".0", ".")
-
                 for idx, (c_name, c_content) in enumerate(reports.items()):
                     st.markdown(f"### 📍 {c_name} 打卡报告")
                     
-                    # 动态纠正文本头部如 `--04.14` 为修正后的截止日期
-                    c_content = re.sub(r'--\d+\.\d+', f'--{yesterday_str}', c_content)
-
                     lines = c_content.split('\n')
                     f_emoji = st.session_state.emojis.get("full", "⭐")
                     p_emoji = st.session_state.emojis.get("part", "✨")
@@ -299,20 +289,12 @@ if st.session_state.btn_clicked:
                     
                     full_cnt, part_cnt, zero_cnt = 0, 0, 0
                     for line in lines:
-                        line_str = line.strip()
-                        if not line_str or "--" in line_str or "学情" in line_str or "提醒" in line_str:
-                            continue
-                        
-                        # 兼容多类型图标统计
-                        parts = line_str.split()
-                        if parts:
-                            emojis_part = parts[0]
-                            if p_emoji not in emojis_part and z_emoji not in emojis_part and f_emoji in emojis_part:
-                                full_cnt += 1
-                            elif f_emoji not in emojis_part and p_emoji not in emojis_part and z_emoji in emojis_part:
-                                zero_cnt += 1
-                            else:
-                                part_cnt += 1
+                        if f_emoji in line:
+                            full_cnt += 1
+                        elif p_emoji in line:
+                            part_cnt += 1
+                        elif z_emoji in line:
+                            zero_cnt += 1
 
                     total_students = full_cnt + part_cnt + zero_cnt
                     pct = round(full_cnt / total_students * 100) if total_students > 0 else 0
@@ -324,10 +306,7 @@ if st.session_state.btn_clicked:
                         f"⚠️ 未打卡提醒：{zero_cnt} 人"
                     )
                     
-                    if "{stats}" in c_content:
-                        final_share_content = c_content.replace("{stats}", stats_text).strip()
-                    else:
-                        final_share_content = re.sub(r'📊 学情统计汇总：[\s\S]*?(?=💡|$)', stats_text + "\n\n", c_content).strip()
+                    final_share_content = c_content.replace("{stats}", stats_text).strip()
 
                     escaped_content = (
                         final_share_content.replace("\\", "\\\\")
