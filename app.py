@@ -1,7 +1,16 @@
 import json
 import streamlit as st
 import streamlit.components.v1 as components
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
+from emoji_presets import (
+    DEFAULT_EMOJIS,
+    EMOJI_KEYS,
+    export_emoji_presets,
+    import_emoji_presets,
+    normalize_custom_emoji_presets,
+    normalize_emoji_config,
+    validate_emoji_config,
+)
 from iread_core import auto_login, fetch_data_via_api, DEFAULT_TEMPLATE, DEFAULT_MATRIX_TEMPLATE
 
 # 尝试引入 Supabase 云端数据库客户端
@@ -41,30 +50,6 @@ EMOJI_PRESETS = {
     "🚀 太空探索": {"full": "🚀", "part": "🛸", "zero": "🌑", "badge": "🌌"},
     "🏆 勋章荣誉": {"full": "🏆", "part": "🥇", "zero": "❌", "badge": "🎖️"}
 }
-DEFAULT_EMOJIS = EMOJI_PRESETS["🏆 勋章荣誉"].copy()
-EMOJI_KEYS = ("full", "part", "zero", "badge")
-
-
-def normalize_emoji_config(config):
-    """只保留 Emoji 主题需要的字段，并兼容旧的云端配置。"""
-    config = config if isinstance(config, dict) else {}
-    return {
-        key: str(config.get(key) or DEFAULT_EMOJIS[key]).strip()
-        for key in EMOJI_KEYS
-    }
-
-
-def normalize_custom_emoji_presets(presets):
-    """清理用户预设，避免坏数据或覆盖内置主题。"""
-    if not isinstance(presets, dict):
-        return {}
-
-    cleaned = {}
-    for name, config in presets.items():
-        clean_name = str(name).strip()
-        if clean_name and clean_name not in EMOJI_PRESETS:
-            cleaned[clean_name] = normalize_emoji_config(config)
-    return cleaned
 
 # 🛡️ 状态初始化
 if "username_key" not in st.session_state:
@@ -87,11 +72,20 @@ if "emoji_preset_select" not in st.session_state:
     st.session_state.emoji_preset_select = "🏆 勋章荣誉"
 if "emoji_input_scope" not in st.session_state:
     st.session_state.emoji_input_scope = 0
+if "emoji_config_valid" not in st.session_state:
+    st.session_state.emoji_config_valid = True
+if "cloud_sync_status" not in st.session_state:
+    st.session_state.cloud_sync_status = {"state": "idle", "message": "尚未同步云端配置。"}
+
+
+def set_cloud_sync_status(state, message):
+    st.session_state.cloud_sync_status = {"state": state, "message": message}
 
 
 def load_user_data_from_cloud(username: str):
     """从 Supabase 云端拉取该用户的专属配置"""
     if not has_supabase or not username:
+        set_cloud_sync_status("failed", "云端服务当前不可用。")
         return False
     try:
         response = supabase.table("user_configs").select("config_json").eq("username", username).execute()
@@ -102,26 +96,33 @@ def load_user_data_from_cloud(username: str):
             st.session_state.custom_template = data.get("custom_template", DEFAULT_TEMPLATE)
             st.session_state.matrix_template = data.get("matrix_template", DEFAULT_MATRIX_TEMPLATE)
             st.session_state.emojis = normalize_emoji_config(data.get("emojis", DEFAULT_EMOJIS))
-            st.session_state.emoji_presets = normalize_custom_emoji_presets(data.get("emoji_presets", {}))
+            st.session_state.emoji_presets = normalize_custom_emoji_presets(
+                data.get("emoji_presets", {}), EMOJI_PRESETS
+            )
             st.session_state.emoji_preset_select = "自定义"
             st.session_state.emoji_input_scope += 1
+            set_cloud_sync_status("synced", f"已从云端加载 · {datetime.now():%H:%M}")
             return True
+        set_cloud_sync_status("empty", "云端暂无配置，首次保存后会自动建立。")
     except Exception as e:
         print(f"云端加载失败: {e}")
+        set_cloud_sync_status("failed", "云端加载失败，请检查网络后重试。")
     return False
 
 def save_user_data_to_cloud(show_toast=True):
     """将当前的配置同步到 Supabase 云端"""
     if not has_supabase:
+        set_cloud_sync_status("failed", "云端服务当前不可用。")
         if show_toast:
             st.warning("⚠️ 未检测到 Supabase 客户端初始化！请检查 SUPABASE_KEY 是否有效。")
-        return
+        return False
     
     u_name = st.session_state.get("username_key", "").strip()
     if not u_name:
+        set_cloud_sync_status("idle", "填写老师手机号后才能同步云端。")
         if show_toast:
             st.warning("⚠️ 请先在上方输入老师手机号，再进行保存！")
-        return
+        return False
     
     payload_data = {
         "class_rules": st.session_state.class_rules,
@@ -136,11 +137,15 @@ def save_user_data_to_cloud(show_toast=True):
             "username": u_name,
             "config_json": json.dumps(payload_data, ensure_ascii=False)
         }).execute()
+        set_cloud_sync_status("synced", f"已保存到云端 · {datetime.now():%H:%M}")
         if show_toast:
             st.toast("☁️ 专属配置已成功保存到云端！", icon="🎉")
+        return True
     except Exception as e:
+        set_cloud_sync_status("failed", "云端保存失败，请检查网络后重试。")
         if show_toast:
             st.error(f"❌ 云端同步失败: {e}")
+        return False
 
 with st.sidebar:
     st.header("⚙️ 参数配置")
@@ -157,6 +162,8 @@ with st.sidebar:
         st.session_state.emoji_presets = {}
         st.session_state.emoji_preset_select = "🏆 勋章荣誉"
         st.session_state.emoji_input_scope += 1
+        st.session_state.emoji_config_valid = True
+        set_cloud_sync_status("idle", "尚未同步云端配置。")
         st.session_state.btn_clicked = False
         st.rerun()
 
@@ -172,12 +179,22 @@ with st.sidebar:
                 st.toast(f"☁️ 账号 [{entered_name}] 的专属配置已从云端同步成功！", icon="🎉")
 
     st.text_input(
-        "老师手机号（用于云端同步配置）", 
+        "老师手机号（用于云端同步配置）",
         value=st.session_state.username_key, 
         placeholder="请输入您的手机号", 
         key="input_username_widget",
         on_change=on_username_change
     )
+
+    sync_status = st.session_state.cloud_sync_status
+    if sync_status["state"] == "synced":
+        st.success(f"☁️ {sync_status['message']}")
+    elif sync_status["state"] == "failed":
+        st.error(f"☁️ {sync_status['message']}")
+    elif sync_status["state"] == "empty":
+        st.info(f"☁️ {sync_status['message']}")
+    else:
+        st.caption(f"☁️ {sync_status['message']}")
 
     login_tab1, login_tab2 = st.tabs(["🔐 账号密码", "🔑 Token"])
     with login_tab1:
@@ -264,7 +281,29 @@ with st.sidebar:
                 e_zero = st.text_input("未打卡", value=st.session_state.emojis["zero"], key=input_keys["zero"])
                 e_badge = st.text_input("满勤尾巴标记", value=st.session_state.emojis["badge"], key=input_keys["badge"])
 
-            st.session_state.emojis = normalize_emoji_config({"full": e_full, "part": e_part, "zero": e_zero, "badge": e_badge})
+            current_emojis, emoji_errors = validate_emoji_config({
+                "full": e_full,
+                "part": e_part,
+                "zero": e_zero,
+                "badge": e_badge,
+            })
+            st.session_state.emoji_config_valid = not emoji_errors
+            if emoji_errors:
+                for error in emoji_errors:
+                    st.error(f"⚠️ {error}")
+            else:
+                st.session_state.emojis = current_emojis
+
+            preview_emojis = {
+                key: current_emojis[key] or "⬜"
+                for key in EMOJI_KEYS
+            }
+            st.markdown("**主题效果预览：**")
+            st.code(
+                f"{preview_emojis['full']}{preview_emojis['part']}{preview_emojis['zero']}  Amy\n"
+                f"{preview_emojis['full']}{preview_emojis['full']}{preview_emojis['full']}  Jack {preview_emojis['badge']}",
+                language=None,
+            )
 
             st.markdown("**保存自己的预设：**")
             st.caption("保存后会出现在上方主题列表；填写老师手机号并保存云端配置后，可在其他设备继续使用。")
@@ -276,17 +315,24 @@ with st.sidebar:
             save_label = "💾 覆盖当前预设" if preset_name in st.session_state.emoji_presets else "💾 保存为新预设"
             save_col, delete_col = st.columns([2, 1])
             with save_col:
-                if st.button(save_label, use_container_width=True, key="save_emoji_preset"):
+                if st.button(
+                    save_label,
+                    use_container_width=True,
+                    key="save_emoji_preset",
+                    disabled=bool(emoji_errors),
+                ):
                     if not preset_name:
                         st.warning("⚠️ 请先填写预设名称。")
                     elif preset_name in EMOJI_PRESETS:
                         st.warning("⚠️ 这个名称属于内置主题，请换一个名称。")
                     else:
-                        st.session_state.emoji_presets[preset_name] = st.session_state.emojis.copy()
+                        st.session_state.emoji_presets[preset_name] = current_emojis.copy()
                         st.session_state.pending_emoji_preset_select = preset_name
                         if st.session_state.get("username_key", "").strip():
-                            save_user_data_to_cloud(show_toast=False)
-                            st.toast(f"☁️ 预设“{preset_name}”已保存并同步到云端！", icon="🎉")
+                            if save_user_data_to_cloud(show_toast=False):
+                                st.toast(f"☁️ 预设“{preset_name}”已保存并同步到云端！", icon="🎉")
+                            else:
+                                st.toast(f"✅ 预设“{preset_name}”已保存，但云端同步失败。", icon="⚠️")
                         else:
                             st.toast(f"✅ 预设“{preset_name}”已保存！填写老师手机号后可跨设备同步。", icon="🎉")
                         st.rerun()
@@ -299,6 +345,45 @@ with st.sidebar:
                             save_user_data_to_cloud(show_toast=False)
                         st.toast(f"🗑️ 预设“{selected_preset}”已删除。")
                         st.rerun()
+
+            st.markdown("**备份与导入预设：**")
+            st.caption("可下载全部自定义预设；导入时，同名预设会被文件中的版本覆盖。")
+            if st.session_state.emoji_presets:
+                st.download_button(
+                    "⬇️ 导出全部预设",
+                    data=export_emoji_presets(st.session_state.emoji_presets),
+                    file_name="iread-emoji-presets.json",
+                    mime="application/json",
+                    use_container_width=True,
+                )
+            else:
+                st.caption("暂无可导出的自定义预设。")
+
+            uploaded_presets = st.file_uploader(
+                "选择预设文件",
+                type=["json"],
+                key="emoji_preset_upload",
+            )
+            if st.button(
+                "⬆️ 导入预设",
+                use_container_width=True,
+                disabled=uploaded_presets is None,
+                key="import_emoji_presets",
+            ):
+                try:
+                    imported_presets = import_emoji_presets(
+                        uploaded_presets.getvalue().decode("utf-8-sig"),
+                        EMOJI_PRESETS,
+                    )
+                    st.session_state.emoji_presets.update(imported_presets)
+                    st.session_state.emoji_input_scope += 1
+                    st.session_state.pending_emoji_preset_select = next(iter(imported_presets))
+                    if st.session_state.get("username_key", "").strip():
+                        save_user_data_to_cloud(show_toast=False)
+                    st.toast(f"✅ 已导入 {len(imported_presets)} 个 Emoji 预设。", icon="🎉")
+                    st.rerun()
+                except (UnicodeDecodeError, json.JSONDecodeError, ValueError) as error:
+                    st.error(f"❌ 导入失败：{error}")
 
             st.markdown("**自定义矩阵模板：**")
             st.session_state.matrix_template = st.text_area("矩阵模板", value=st.session_state.matrix_template, height=180)
@@ -338,7 +423,15 @@ with st.sidebar:
     if st.button("💾 手动保存当前配置到云端", type="secondary", use_container_width=True):
         save_user_data_to_cloud(show_toast=True)
 
-    btn_generate = st.button("⚡ 一键生成打卡报告", type="primary", use_container_width=True)
+    emoji_blocked = output_mode == "🍓 矩阵式周打卡榜" and not st.session_state.emoji_config_valid
+    if emoji_blocked:
+        st.caption("⚠️ 修正 Emoji 设置后才能生成矩阵报告。")
+    btn_generate = st.button(
+        "⚡ 一键生成打卡报告",
+        type="primary",
+        use_container_width=True,
+        disabled=emoji_blocked,
+    )
 
     if btn_generate:
         st.session_state.btn_clicked = True
