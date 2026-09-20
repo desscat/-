@@ -41,6 +41,30 @@ EMOJI_PRESETS = {
     "🚀 太空探索": {"full": "🚀", "part": "🛸", "zero": "🌑", "badge": "🌌"},
     "🏆 勋章荣誉": {"full": "🏆", "part": "🥇", "zero": "❌", "badge": "🎖️"}
 }
+DEFAULT_EMOJIS = EMOJI_PRESETS["🏆 勋章荣誉"].copy()
+EMOJI_KEYS = ("full", "part", "zero", "badge")
+
+
+def normalize_emoji_config(config):
+    """只保留 Emoji 主题需要的字段，并兼容旧的云端配置。"""
+    config = config if isinstance(config, dict) else {}
+    return {
+        key: str(config.get(key) or DEFAULT_EMOJIS[key]).strip()
+        for key in EMOJI_KEYS
+    }
+
+
+def normalize_custom_emoji_presets(presets):
+    """清理用户预设，避免坏数据或覆盖内置主题。"""
+    if not isinstance(presets, dict):
+        return {}
+
+    cleaned = {}
+    for name, config in presets.items():
+        clean_name = str(name).strip()
+        if clean_name and clean_name not in EMOJI_PRESETS:
+            cleaned[clean_name] = normalize_emoji_config(config)
+    return cleaned
 
 # 🛡️ 状态初始化
 if "username_key" not in st.session_state:
@@ -56,7 +80,14 @@ if "custom_template" not in st.session_state:
 if "matrix_template" not in st.session_state:
     st.session_state.matrix_template = DEFAULT_MATRIX_TEMPLATE
 if "emojis" not in st.session_state:
-    st.session_state.emojis = {"full": "🏆", "part": "🥇", "zero": "❌", "badge": "🎖️"}
+    st.session_state.emojis = DEFAULT_EMOJIS.copy()
+if "emoji_presets" not in st.session_state:
+    st.session_state.emoji_presets = {}
+if "emoji_preset_select" not in st.session_state:
+    st.session_state.emoji_preset_select = "🏆 勋章荣誉"
+if "emoji_input_scope" not in st.session_state:
+    st.session_state.emoji_input_scope = 0
+
 
 def load_user_data_from_cloud(username: str):
     """从 Supabase 云端拉取该用户的专属配置"""
@@ -70,7 +101,10 @@ def load_user_data_from_cloud(username: str):
             st.session_state.name_maps = data.get("name_maps", {})
             st.session_state.custom_template = data.get("custom_template", DEFAULT_TEMPLATE)
             st.session_state.matrix_template = data.get("matrix_template", DEFAULT_MATRIX_TEMPLATE)
-            st.session_state.emojis = data.get("emojis", {"full": "🏆", "part": "🥇", "zero": "❌", "badge": "🎖️"})
+            st.session_state.emojis = normalize_emoji_config(data.get("emojis", DEFAULT_EMOJIS))
+            st.session_state.emoji_presets = normalize_custom_emoji_presets(data.get("emoji_presets", {}))
+            st.session_state.emoji_preset_select = "自定义"
+            st.session_state.emoji_input_scope += 1
             return True
     except Exception as e:
         print(f"云端加载失败: {e}")
@@ -94,7 +128,8 @@ def save_user_data_to_cloud(show_toast=True):
         "name_maps": st.session_state.name_maps,
         "custom_template": st.session_state.custom_template,
         "matrix_template": st.session_state.matrix_template,
-        "emojis": st.session_state.emojis
+        "emojis": st.session_state.emojis,
+        "emoji_presets": st.session_state.emoji_presets
     }
     try:
         supabase.table("user_configs").upsert({
@@ -118,7 +153,10 @@ with st.sidebar:
         st.session_state.name_maps = {}
         st.session_state.custom_template = DEFAULT_TEMPLATE
         st.session_state.matrix_template = DEFAULT_MATRIX_TEMPLATE
-        st.session_state.emojis = {"full": "🏆", "part": "🥇", "zero": "❌", "badge": "🎖️"}
+        st.session_state.emojis = DEFAULT_EMOJIS.copy()
+        st.session_state.emoji_presets = {}
+        st.session_state.emoji_preset_select = "🏆 勋章荣誉"
+        st.session_state.emoji_input_scope += 1
         st.session_state.btn_clicked = False
         st.rerun()
 
@@ -192,21 +230,76 @@ with st.sidebar:
     st.subheader("3. 🎨 DIY 格式与 Emoji 主题")
     with st.expander("✨ 点击展开/修改模板与 Emoji 主题", expanded=False):
         if output_mode == "🍓 矩阵式周打卡榜":
-            selected_preset = st.selectbox("选择 Emoji 预设主题", list(EMOJI_PRESETS.keys()), index=4)
-            if selected_preset != "自定义" and EMOJI_PRESETS[selected_preset]:
-                st.session_state.emojis = EMOJI_PRESETS[selected_preset]
+            preset_options = list(EMOJI_PRESETS.keys()) + [
+                name for name in st.session_state.emoji_presets
+                if name not in EMOJI_PRESETS
+            ]
+            pending_preset = st.session_state.pop("pending_emoji_preset_select", None)
+            if pending_preset in preset_options:
+                st.session_state.emoji_preset_select = pending_preset
+            if st.session_state.emoji_preset_select not in preset_options:
+                st.session_state.emoji_preset_select = "自定义"
+
+            selected_preset = st.selectbox(
+                "选择 Emoji 预设主题",
+                preset_options,
+                key="emoji_preset_select"
+            )
+
+            selected_config = EMOJI_PRESETS.get(selected_preset)
+            if selected_config is None:
+                selected_config = st.session_state.emoji_presets.get(selected_preset, st.session_state.emojis)
+            st.session_state.emojis = normalize_emoji_config(selected_config)
+            input_keys = {
+                key: f"emoji_{key}_{st.session_state.emoji_input_scope}_{selected_preset}"
+                for key in EMOJI_KEYS
+            }
 
             st.markdown("**自定义 Emoji 标记：**")
             col_e1, col_e2 = st.columns(2)
             with col_e1:
-                e_full = st.text_input("全勤达标", value=st.session_state.emojis.get("full", "🏆"), key="e_full_input")
-                e_part = st.text_input("部分达标", value=st.session_state.emojis.get("part", "🥇"), key="e_part_input")
+                e_full = st.text_input("全勤达标", value=st.session_state.emojis["full"], key=input_keys["full"])
+                e_part = st.text_input("部分达标", value=st.session_state.emojis["part"], key=input_keys["part"])
             with col_e2:
-                e_zero = st.text_input("未打卡", value=st.session_state.emojis.get("zero", "❌"), key="e_zero_input")
-                e_badge = st.text_input("满勤尾巴标记", value=st.session_state.emojis.get("badge", "🎖️"), key="e_badge_input")
-            
-            st.session_state.emojis = {"full": e_full, "part": e_part, "zero": e_zero, "badge": e_badge}
-            
+                e_zero = st.text_input("未打卡", value=st.session_state.emojis["zero"], key=input_keys["zero"])
+                e_badge = st.text_input("满勤尾巴标记", value=st.session_state.emojis["badge"], key=input_keys["badge"])
+
+            st.session_state.emojis = normalize_emoji_config({"full": e_full, "part": e_part, "zero": e_zero, "badge": e_badge})
+
+            st.markdown("**保存自己的预设：**")
+            st.caption("保存后会出现在上方主题列表；填写老师手机号并保存云端配置后，可在其他设备继续使用。")
+            preset_name = st.text_input(
+                "预设名称",
+                placeholder="例如：周末鼓励主题",
+                key="new_emoji_preset_name"
+            ).strip()
+            save_label = "💾 覆盖当前预设" if preset_name in st.session_state.emoji_presets else "💾 保存为新预设"
+            save_col, delete_col = st.columns([2, 1])
+            with save_col:
+                if st.button(save_label, use_container_width=True, key="save_emoji_preset"):
+                    if not preset_name:
+                        st.warning("⚠️ 请先填写预设名称。")
+                    elif preset_name in EMOJI_PRESETS:
+                        st.warning("⚠️ 这个名称属于内置主题，请换一个名称。")
+                    else:
+                        st.session_state.emoji_presets[preset_name] = st.session_state.emojis.copy()
+                        st.session_state.pending_emoji_preset_select = preset_name
+                        if st.session_state.get("username_key", "").strip():
+                            save_user_data_to_cloud(show_toast=False)
+                            st.toast(f"☁️ 预设“{preset_name}”已保存并同步到云端！", icon="🎉")
+                        else:
+                            st.toast(f"✅ 预设“{preset_name}”已保存！填写老师手机号后可跨设备同步。", icon="🎉")
+                        st.rerun()
+            with delete_col:
+                if selected_preset in st.session_state.emoji_presets:
+                    if st.button("🗑️ 删除预设", use_container_width=True, key="delete_emoji_preset"):
+                        del st.session_state.emoji_presets[selected_preset]
+                        st.session_state.pending_emoji_preset_select = "自定义"
+                        if st.session_state.get("username_key", "").strip():
+                            save_user_data_to_cloud(show_toast=False)
+                        st.toast(f"🗑️ 预设“{selected_preset}”已删除。")
+                        st.rerun()
+
             st.markdown("**自定义矩阵模板：**")
             st.session_state.matrix_template = st.text_area("矩阵模板", value=st.session_state.matrix_template, height=180)
         else:
