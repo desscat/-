@@ -16,7 +16,7 @@
     const signature = JSON.stringify([args.action, args.login]);
     if (signature === lastRequest) return;
     lastRequest = signature;
-    const result = {loaded: true, login: null, status: "ok", error: false};
+    const result = {loaded: true, action: args.action, login: null, status: "ok", error: false};
     try {
       if (args.action === "load") {
         const raw = localStorage.getItem(storageKey);
@@ -45,7 +45,12 @@
         }
       } else if (args.action === "save" && args.login) {
         const {version, username, token, expires_at} = args.login;
-        localStorage.setItem(storageKey, JSON.stringify({version, username, token, expires_at}));
+        const record = JSON.stringify({version, username, token, expires_at});
+        localStorage.setItem(storageKey, record);
+        if (localStorage.getItem(storageKey) !== record) throw new Error("Login storage did not retain the record");
+        result.status = "saved";
+        result.username = username;
+        result.expires_at = expires_at;
       } else if (args.action === "clear") {
         localStorage.removeItem(storageKey);
       }

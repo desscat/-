@@ -325,6 +325,13 @@ with st.sidebar:
     st.caption("勾选后，下次打开自动恢复登录；仅保存手机号和登录凭证，不保存密码。公用设备请勿勾选。")
     if st.session_state.login_storage_error:
         st.warning("浏览器未能保存登录状态。本次仍可使用；请允许本站存储后再试。")
+    elif st.session_state.remember_login and st.session_state.login_authenticated and st.session_state.token:
+        if (isinstance(storage_result, dict) and storage_result.get("status") == "saved"
+                and storage_result.get("username") == st.session_state.username_key
+                and storage_result.get("expires_at") == st.session_state.login_expires_at):
+            st.caption("✅ 本机已保存登录。下次用同一浏览器打开，会自动恢复；密码框留空即可。")
+        else:
+            st.caption("正在保存到本机，请等到出现‘本机已保存登录’后再关闭页面。")
 
     sync_status = st.session_state.cloud_sync_status
     if sync_status["state"] == "synced":

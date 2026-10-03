@@ -32,7 +32,10 @@ function frame(blocked = false) {
 
 const login = {version: 1, username: "test-teacher", token: "fake-test-token", expires_at: Date.now() / 1000 + 3600, password: "never-save"};
 const first = frame();
-first.call({action: "save", login});
+const savedResult = first.call({action: "save", login});
+assert.equal(savedResult.status, "saved");
+assert.equal(savedResult.expires_at, login.expires_at);
+assert.equal(savedResult.login, null, "Save acknowledgement must not echo credentials");
 assert.equal(JSON.parse(store.get(key)).password, undefined);
 const nextDay = frame();
 assert.equal(nextDay.call({action: "load"}).login.token, login.token);

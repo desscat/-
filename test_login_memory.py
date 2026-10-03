@@ -17,11 +17,12 @@ class BrowserMemory:
         self.saved = None
 
     def __call__(self, action, login, **kwargs):
-        result = {"loaded": True, "login": None, "error": False, "status": "ok"}
+        result = {"loaded": True, "action": action, "login": None, "error": False, "status": "ok"}
         if action == "load":
             result["login"] = copy.deepcopy(self.saved)
         elif action == "save":
             self.saved = copy.deepcopy(login)
+            result.update(status="saved", username=login["username"], expires_at=login["expires_at"])
         elif action == "clear":
             self.saved = None
         return result
@@ -90,6 +91,7 @@ class LoginFlowTests(unittest.TestCase):
     def test_remembered_login_survives_a_new_session_without_password_or_relogin(self):
         app = self.sign_in()
         self.assertEqual(app.text_input("login_password").value, "")
+        self.assertTrue(any("✅ 本机已保存登录" in caption.value for caption in app.caption))
         self.assertEqual(set(self.browser.saved), {"version", "username", "token", "expires_at"})
         self.assertEqual(self.login.call_count, 1)
         restored = self.app()
