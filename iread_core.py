@@ -3,6 +3,8 @@ import requests
 import traceback
 from datetime import date, timedelta
 
+AUTH_EXPIRED_MESSAGE = "登录已过期，请重新登录。"
+
 # 💡 完美适配你要求的传统汇报模板格式
 DEFAULT_TEMPLATE = """[以下为{date_title}的打卡情况]
 
@@ -91,10 +93,14 @@ def fetch_data_via_api(auth_token, report_type, start_date, end_date, class_rule
     
     try:
         resp = requests.get(classes_url, headers=headers, timeout=15)
+        if resp.status_code in (401, 403):
+            return None, AUTH_EXPIRED_MESSAGE
         if resp.status_code != 200:
-            return None, f"Token 失效或服务器错误 (状态码: {resp.status_code})"
+            return None, f"请求班级列表失败 (状态码: {resp.status_code})"
             
         res_json = resp.json()
+        if isinstance(res_json, dict) and res_json.get("code") in (401, 403, "401", "403"):
+            return None, AUTH_EXPIRED_MESSAGE
         raw_data = res_json.get("data", [])
         
         classes_data = []
@@ -137,6 +143,8 @@ def fetch_data_via_api(auth_token, report_type, start_date, end_date, class_rule
                     stats_url = f"https://v2.ireadabc.com/api/v3/reports/statistics/class/{class_id}"
                     
                     stat_resp = requests.get(stats_url, headers=headers, params={"start": curr_date, "end": curr_date}, timeout=15)
+                    if stat_resp.status_code in (401, 403):
+                        return None, AUTH_EXPIRED_MESSAGE
                     if stat_resp.status_code == 200:
                         s_json = stat_resp.json()
                         students_raw = s_json.get("data", []) if isinstance(s_json, dict) else s_json
@@ -248,6 +256,8 @@ def fetch_data_via_api(auth_token, report_type, start_date, end_date, class_rule
 
             stats_url = f"https://v2.ireadabc.com/api/v3/reports/statistics/class/{class_id}"
             stat_resp = requests.get(stats_url, headers=headers, params={"start": s_date, "end": e_date}, timeout=15)
+            if stat_resp.status_code in (401, 403):
+                return None, AUTH_EXPIRED_MESSAGE
 
             if stat_resp.status_code == 200:
                 s_json = stat_resp.json()
@@ -312,3 +322,4 @@ def fetch_data_via_api(auth_token, report_type, start_date, end_date, class_rule
     except Exception as e:
         traceback.print_exc()
         return None, str(e)
+

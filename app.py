@@ -1,4 +1,6 @@
 import json
+import time
+from pathlib import Path
 import streamlit as st
 import streamlit.components.v1 as components
 from datetime import date, datetime, timedelta
@@ -11,7 +13,8 @@ from emoji_presets import (
     normalize_emoji_config,
     validate_emoji_config,
 )
-from iread_core import auto_login, fetch_data_via_api, DEFAULT_TEMPLATE, DEFAULT_MATRIX_TEMPLATE
+from iread_core import auto_login, fetch_data_via_api, DEFAULT_TEMPLATE, DEFAULT_MATRIX_TEMPLATE, AUTH_EXPIRED_MESSAGE
+from login_memory import LOGIN_MEMORY_SECONDS, normalize_saved_login
 
 # 尝试引入 Supabase 云端数据库客户端
 try:
@@ -76,6 +79,21 @@ if "emoji_config_valid" not in st.session_state:
     st.session_state.emoji_config_valid = True
 if "cloud_sync_status" not in st.session_state:
     st.session_state.cloud_sync_status = {"state": "idle", "message": "尚未同步云端配置。"}
+
+for key, value in {
+    "remember_login": False,
+    "login_storage_loaded": False,
+    "login_storage_error": False,
+    "login_authenticated": False,
+    "login_expires_at": 0,
+    "login_notice": "",
+    "login_notice_kind": "info",
+}.items():
+    st.session_state.setdefault(key, value)
+
+browser_login = components.declare_component(
+    "browser_login", path=str(Path(__file__).parent / "browser_login")
+)
 
 
 def set_cloud_sync_status(state, message):
@@ -147,44 +165,152 @@ def save_user_data_to_cloud(show_toast=True):
             st.error(f"❌ 云端同步失败: {e}")
         return False
 
+def reset_account_config():
+    for class_name in st.session_state.class_rules:
+        for prefix in ("l", "a", "b", "m"):
+            st.session_state.pop(f"{prefix}_{class_name}", None)
+    st.session_state.class_rules = {}
+    st.session_state.name_maps = {}
+    st.session_state.custom_template = DEFAULT_TEMPLATE
+    st.session_state.matrix_template = DEFAULT_MATRIX_TEMPLATE
+    st.session_state.emojis = DEFAULT_EMOJIS.copy()
+    st.session_state.emoji_presets = {}
+    st.session_state.emoji_preset_select = "🏆 勋章荣誉"
+    st.session_state.emoji_input_scope += 1
+    st.session_state.emoji_config_valid = True
+    set_cloud_sync_status("idle", "尚未同步云端配置。")
+
+
+def clear_login(clear_account=False):
+    st.session_state.token = ""
+    st.session_state.login_authenticated = False
+    st.session_state.login_expires_at = 0
+    st.session_state.login_storage_loaded = True
+    st.session_state.clear_login_fields = True
+    st.session_state.btn_clicked = False
+    if clear_account:
+        st.session_state.username_key = ""
+        st.session_state.input_username_widget = ""
+        st.session_state.remember_login = False
+        reset_account_config()
+    st.session_state.login_notice = ""
+
+
+def on_username_change():
+    entered_name = st.session_state.input_username_widget.strip()
+    if entered_name != st.session_state.username_key:
+        clear_login()
+        reset_account_config()
+        st.session_state.username_key = entered_name
+        if entered_name:
+            load_user_data_from_cloud(entered_name)
+
+
+def on_token_change():
+    st.session_state.token = st.session_state.manual_token.strip()
+    st.session_state.login_authenticated = False
+    st.session_state.login_storage_loaded = True
+    st.session_state.login_notice = ""
+    st.session_state.btn_clicked = False
+
+
+def login_with_password():
+    username = st.session_state.username_key.strip()
+    password = st.session_state.get("login_password", "")
+    if not username or not password:
+        st.session_state.login_notice = "请填写老师手机号和打卡平台密码。"
+        st.session_state.login_notice_kind = "warning"
+        return
+    token, error = auto_login(username, password)
+    if error or not token:
+        st.session_state.login_notice = f"登录失败：{error or '未获取到登录凭证'}"
+        st.session_state.login_notice_kind = "error"
+        return
+    st.session_state.token = token
+    st.session_state.login_authenticated = True
+    st.session_state.login_storage_loaded = True
+    st.session_state.login_expires_at = time.time() + LOGIN_MEMORY_SECONDS
+    st.session_state.clear_password_field = True
+    st.session_state.sync_token_field = True
+    st.session_state.login_notice = ""
+
+
+def on_remember_change():
+    # A deliberate choice must win over a delayed browser restore.
+    st.session_state.login_storage_loaded = True
+
+
+if st.session_state.pop("clear_login_fields", False):
+    st.session_state.login_password = ""
+    st.session_state.manual_token = ""
+if st.session_state.pop("clear_password_field", False):
+    st.session_state.login_password = ""
+if st.session_state.pop("sync_token_field", False):
+    st.session_state.manual_token = st.session_state.token
+
 with st.sidebar:
+    saved_login = None
+    storage_action = "load"
+    if st.session_state.login_storage_loaded:
+        storage_action = "clear"
+        if st.session_state.remember_login and st.session_state.login_authenticated and st.session_state.token:
+            saved_login = normalize_saved_login({
+                "version": 1,
+                "username": st.session_state.username_key,
+                "token": st.session_state.token,
+                "expires_at": st.session_state.login_expires_at,
+            })
+            if saved_login:
+                storage_action = "save"
+    storage_result = browser_login(
+        action=storage_action, login=saved_login, key="browser_login", default=None
+    )
+    if isinstance(storage_result, dict) and storage_result.get("loaded"):
+        st.session_state.login_storage_error = bool(storage_result.get("error"))
+        if not st.session_state.login_storage_loaded:
+            st.session_state.login_storage_loaded = True
+            restored = normalize_saved_login(storage_result.get("login"))
+            if restored and not st.session_state.username_key and not st.session_state.token:
+                st.session_state.username_key = restored["username"]
+                st.session_state.input_username_widget = restored["username"]
+                st.session_state.token = restored["token"]
+                st.session_state.manual_token = restored["token"]
+                st.session_state.login_expires_at = restored["expires_at"]
+                st.session_state.login_authenticated = True
+                st.session_state.remember_login = True
+                if restored["username"]:
+                    load_user_data_from_cloud(restored["username"])
+            elif storage_result.get("status") in ("expired", "invalid"):
+                st.session_state.login_notice = "本机保存的登录已过期或不可用，请重新登录。"
+                st.session_state.login_notice_kind = "warning"
+            st.rerun()
+
     st.header("⚙️ 参数配置")
-    
+
     if st.button("🧹 清空/重置所有配置", type="secondary", use_container_width=True):
         st.query_params.clear()
-        st.session_state.username_key = ""
-        st.session_state.token = ""
-        st.session_state.class_rules = {}
-        st.session_state.name_maps = {}
-        st.session_state.custom_template = DEFAULT_TEMPLATE
-        st.session_state.matrix_template = DEFAULT_MATRIX_TEMPLATE
-        st.session_state.emojis = DEFAULT_EMOJIS.copy()
-        st.session_state.emoji_presets = {}
-        st.session_state.emoji_preset_select = "🏆 勋章荣誉"
-        st.session_state.emoji_input_scope += 1
-        st.session_state.emoji_config_valid = True
-        set_cloud_sync_status("idle", "尚未同步云端配置。")
-        st.session_state.btn_clicked = False
+        clear_login(clear_account=True)
         st.rerun()
 
     st.subheader("1. 身份与凭证")
-    
-    def on_username_change():
-        entered_name = st.session_state.get("input_username_widget", "").strip()
-        if entered_name:
-            st.session_state.username_key = entered_name
-            st.session_state.token = ""  # 账号切换时清空旧 Token
-            found = load_user_data_from_cloud(entered_name)
-            if found:
-                st.toast(f"☁️ 账号 [{entered_name}] 的专属配置已从云端同步成功！", icon="🎉")
+    if st.session_state.login_authenticated and st.session_state.token:
+        st.success("已登录，可直接生成打卡报告。")
+        st.button("退出登录 / 切换账号", on_click=clear_login, args=(True,), use_container_width=True)
+    if st.session_state.login_notice:
+        getattr(st, st.session_state.login_notice_kind)(st.session_state.login_notice)
 
+    st.session_state.setdefault("input_username_widget", st.session_state.username_key)
     st.text_input(
-        "老师手机号（用于云端同步配置）",
-        value=st.session_state.username_key, 
-        placeholder="请输入您的手机号", 
+        "老师手机号",
+        placeholder="请输入您的手机号",
+        help="用于打卡平台登录和云端配置同步。",
         key="input_username_widget",
-        on_change=on_username_change
+        on_change=on_username_change,
     )
+    st.checkbox("在这台设备记住登录（30 天）", key="remember_login", on_change=on_remember_change)
+    st.caption("勾选后，下次打开自动恢复登录；仅保存手机号和登录凭证，不保存密码。公用设备请勿勾选。")
+    if st.session_state.login_storage_error:
+        st.warning("浏览器未能保存登录状态。本次仍可使用；请允许本站存储后再试。")
 
     sync_status = st.session_state.cloud_sync_status
     if sync_status["state"] == "synced":
@@ -198,17 +324,12 @@ with st.sidebar:
 
     login_tab1, login_tab2 = st.tabs(["🔐 账号密码", "🔑 Token"])
     with login_tab1:
-        username_input = st.text_input("打卡平台手机号", value=st.session_state.username_key)
-        password_input = st.text_input("打卡平台密码", type="password")
+        with st.form("login_credentials"):
+            st.text_input("打卡平台密码", type="password", key="login_password")
+            st.form_submit_button("登录", on_click=login_with_password, use_container_width=True)
     with login_tab2:
-        token_input = st.text_input("Token", value=st.session_state.token, type="password")
-        if token_input != st.session_state.token:
-            st.session_state.token = token_input
-
-    if username_input and username_input != st.session_state.username_key:
-        st.session_state.username_key = username_input
-        st.session_state.token = ""
-        load_user_data_from_cloud(username_input)
+        st.session_state.setdefault("manual_token", st.session_state.token)
+        st.text_input("Token", type="password", key="manual_token", on_change=on_token_change)
 
     st.subheader("2. 模式与时间选择")
     output_mode = st.radio("选择输出格式", ["🍓 矩阵式周打卡榜", "📋 传统分组文字汇总"], index=0)
@@ -439,22 +560,10 @@ with st.sidebar:
         st.rerun()
 
 if st.session_state.btn_clicked:
-    final_token = ""
-    if username_input and password_input:
-        with st.spinner("🔑 正在登录..."):
-            login_token, login_err = auto_login(username_input, password_input)
-            if login_err:
-                st.error(f"❌ 登录失败：{login_err}")
-                st.stop()
-            else:
-                final_token = login_token
-                st.session_state.token = login_token
-                save_user_data_to_cloud(show_toast=False)
-    else:
-        final_token = st.session_state.token
+    final_token = st.session_state.token
 
     if not final_token:
-        st.warning("⚠️ 请先在左侧边栏填写账号密码或 Token！")
+        st.warning("请先填写手机号和密码并点击“登录”，或填写 Token。")
     else:
         with st.spinner("⚡ 正在抓取打卡数据并生成报告..."):
             mode_key = "matrix" if output_mode.startswith("🍓") else "traditional"
@@ -465,9 +574,18 @@ if st.session_state.btn_clicked:
                 class_rules_config, name_maps_config, {"listen": 60, "anim": 15, "books": 2}, 
                 curr_tmpl, mode=mode_key, emoji_config=st.session_state.emojis
             )
-            if err:
+            if err == AUTH_EXPIRED_MESSAGE:
+                clear_login()
+                st.session_state.login_notice = AUTH_EXPIRED_MESSAGE
+                st.session_state.login_notice_kind = "warning"
+                st.rerun()
+            elif err:
                 st.error(f"❌ 错误：{err}")
             elif reports:
+                if not st.session_state.login_authenticated:
+                    st.session_state.login_authenticated = True
+                    st.session_state.login_expires_at = time.time() + LOGIN_MEMORY_SECONDS
+                    st.rerun()
                 st.toast("🎉 打卡报告生成成功！", icon="🚀")
                 
                 for idx, (c_name, c_content) in enumerate(reports.items()):
@@ -574,3 +692,4 @@ if st.session_state.btn_clicked:
                     components.html(custom_copy_card, height=card_height)
 else:
     st.info("👈 请在左侧边栏配置班级与规则，点击 **〈💾 手动保存当前配置到云端〉** 或 **〈⚡ 一键生成打卡报告〉** 即可。")
+

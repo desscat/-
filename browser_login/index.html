@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="zh-CN">
+<head><meta charset="utf-8"><title>本机登录状态</title></head>
+<body>
+<script>
+(() => {
+  const storageKey = "iread.remembered-login.v1";
+  const parentOrigin = new URL(document.referrer || location.href).origin;
+  let lastRequest = "";
+  function send(type, fields) {
+    window.parent.postMessage({isStreamlitMessage: true, type, ...fields}, parentOrigin);
+  }
+  window.addEventListener("message", event => {
+    if (event.source !== window.parent || event.origin !== parentOrigin || event.data?.type !== "streamlit:render") return;
+    const args = event.data.args || {};
+    const signature = JSON.stringify([args.action, args.login]);
+    if (signature === lastRequest) return;
+    lastRequest = signature;
+    const result = {loaded: true, login: null, status: "ok", error: false};
+    try {
+      if (args.action === "load") {
+        const raw = localStorage.getItem(storageKey);
+        if (raw) {
+          try {
+            const saved = JSON.parse(raw);
+            const expires = saved?.expires_at;
+            if (saved?.version !== 1 || typeof saved.username !== "string" || saved.username.length > 128 ||
+                typeof saved.token !== "string" || !saved.token.trim() || saved.token.length > 16384 || /[\r\n]/.test(saved.token) ||
+                typeof expires !== "number" || !Number.isFinite(expires) ||
+                expires > Date.now() / 1000 + 30 * 86400 + 300) {
+              result.status = "invalid";
+              localStorage.removeItem(storageKey);
+            } else if (expires <= Date.now() / 1000) {
+              result.status = "expired";
+              localStorage.removeItem(storageKey);
+            } else {
+              result.login = {version: 1, username: saved.username, token: saved.token, expires_at: expires};
+            }
+          } catch (error) {
+            if (error instanceof SyntaxError) {
+              result.status = "invalid";
+              localStorage.removeItem(storageKey);
+            } else throw error;
+          }
+        }
+      } else if (args.action === "save" && args.login) {
+        const {version, username, token, expires_at} = args.login;
+        localStorage.setItem(storageKey, JSON.stringify({version, username, token, expires_at}));
+      } else if (args.action === "clear") {
+        localStorage.removeItem(storageKey);
+      }
+    } catch (error) {
+      result.error = true;
+    }
+    send("streamlit:setComponentValue", {value: result, dataType: "json"});
+  });
+  send("streamlit:componentReady", {apiVersion: 1});
+  send("streamlit:setFrameHeight", {height: 0});
+})();
+</script>
+</body>
+</html>
