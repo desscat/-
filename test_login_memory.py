@@ -1,7 +1,9 @@
 import copy
+import json
 import time
 import unittest
 from datetime import date
+from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 from streamlit.testing.v1 import AppTest
@@ -23,6 +25,36 @@ class BrowserMemory:
         elif action == "clear":
             self.saved = None
         return result
+
+
+class ConfigCloud:
+    def __init__(self):
+        self.config = {"class_rules": {"原班级": {"listen": 60, "anim": 15, "books": 2}}, "name_maps": {"原班级": "测试学生:Student"}}
+        self.failed = False
+        self.writes = []
+        self.payload = None
+
+    def table(self, *args):
+        return self
+
+    def select(self, *args):
+        self.payload = None
+        return self
+
+    def eq(self, *args):
+        return self
+
+    def upsert(self, payload):
+        self.payload = payload
+        return self
+
+    def execute(self):
+        if self.payload is not None:
+            self.writes.append(self.payload)
+            return SimpleNamespace(data=[])
+        if self.failed:
+            raise ConnectionError("模拟云端读取失败")
+        return SimpleNamespace(data=[{"config_json": json.dumps(self.config)}])
 
 
 class LoginFlowTests(unittest.TestCase):
@@ -122,6 +154,46 @@ class LoginFlowTests(unittest.TestCase):
         self.assertEqual(self.login.call_count, 0)
         self.assertIsNone(self.browser.saved)
         self.assertTrue(any("点击“登录”" in warning.value for warning in app.warning))
+
+    def use_config_cloud(self):
+        cloud = ConfigCloud()
+        module = SimpleNamespace(create_client=lambda *args: cloud, Client=ConfigCloud)
+        cloud_patch = patch.dict("sys.modules", {"supabase": module})
+        cloud_patch.start()
+        self.addCleanup(cloud_patch.stop)
+        return cloud
+
+    def test_remembered_login_restores_cloud_classes_and_name_mappings(self):
+        cloud = self.use_config_cloud()
+        self.sign_in()
+        restored = self.app()
+        self.assertEqual(restored.session_state.class_rules, cloud.config["class_rules"])
+        self.assertEqual(restored.text_area("m_原班级").value, "测试学生:Student")
+        restored.text_area("m_原班级").set_value("本地编辑:Local").run()
+        self.click(restored, "🔄 重新加载云端配置")
+        self.assertEqual(restored.text_area("m_原班级").value, "测试学生:Student")
+        self.assertFalse(cloud.writes)
+
+    def test_failed_cloud_load_cannot_overwrite_saved_mappings_and_can_retry(self):
+        cloud = self.use_config_cloud()
+        cloud.failed = True
+        app = self.sign_in()
+        self.click(app, "⚡ 一键生成打卡报告")
+        self.click(app, "💾 手动保存当前配置到云端")
+        self.assertFalse(cloud.writes)
+        self.assertTrue(any("暂停保存" in warning.value for warning in app.warning))
+        cloud.failed = False
+        self.click(app, "🔄 重新加载云端配置")
+        self.assertEqual(app.text_area("m_原班级").value, "测试学生:Student")
+        self.click(app, "⚡ 一键生成打卡报告")
+        self.assertEqual(json.loads(cloud.writes[-1]["config_json"])["name_maps"], cloud.config["name_maps"])
+
+    def test_generation_does_not_auto_save_empty_configuration(self):
+        cloud = self.use_config_cloud()
+        cloud.config = {}
+        app = self.sign_in()
+        self.click(app, "⚡ 一键生成打卡报告")
+        self.assertFalse(cloud.writes)
 
 
 class LoginBoundaryTests(unittest.TestCase):

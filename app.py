@@ -108,7 +108,14 @@ def load_user_data_from_cloud(username: str):
     try:
         response = supabase.table("user_configs").select("config_json").eq("username", username).execute()
         if response.data and len(response.data) > 0:
-            data = json.loads(response.data[0]["config_json"])
+            stored_config = response.data[0]["config_json"]
+            data = json.loads(stored_config) if isinstance(stored_config, str) else stored_config
+            if not isinstance(data, dict) or not isinstance(data.get("class_rules", {}), dict) or not isinstance(data.get("name_maps", {}), dict):
+                raise ValueError("云端配置格式不可用")
+            # Recreated widgets must use the loaded configuration, not stale edits.
+            for class_name in set(st.session_state.class_rules) | set(data.get("class_rules", {})):
+                for prefix in ("l", "a", "b", "m"):
+                    st.session_state.pop(f"{prefix}_{class_name}", None)
             st.session_state.class_rules = data.get("class_rules", {})
             st.session_state.name_maps = data.get("name_maps", {})
             st.session_state.custom_template = data.get("custom_template", DEFAULT_TEMPLATE)
@@ -140,6 +147,11 @@ def save_user_data_to_cloud(show_toast=True):
         set_cloud_sync_status("idle", "填写老师手机号后才能同步云端。")
         if show_toast:
             st.warning("⚠️ 请先在上方输入老师手机号，再进行保存！")
+        return False
+
+    if st.session_state.cloud_sync_status["state"] not in ("synced", "empty"):
+        if show_toast:
+            st.warning("尚未成功读取云端配置，已暂停保存，避免覆盖原有班级和映射。请先点击‘重新加载云端配置’。")
         return False
     
     payload_data = {
@@ -233,6 +245,8 @@ def login_with_password():
     st.session_state.clear_password_field = True
     st.session_state.sync_token_field = True
     st.session_state.login_notice = ""
+    if st.session_state.cloud_sync_status["state"] in ("idle", "failed"):
+        load_user_data_from_cloud(username)
 
 
 def on_remember_change():
@@ -513,6 +527,15 @@ with st.sidebar:
             st.session_state.custom_template = st.text_area("文字模板", value=st.session_state.custom_template, height=180)
 
     st.subheader("4. ⚙️ 班级与映射管理")
+    st.button(
+        "🔄 重新加载云端配置",
+        on_click=load_user_data_from_cloud,
+        args=(st.session_state.username_key,),
+        disabled=not st.session_state.username_key,
+        use_container_width=True,
+    )
+    if not st.session_state.class_rules:
+        st.caption("填写原来保存配置时的老师手机号后，班级和姓名映射会从云端加载。加载失败时，可点击上方按钮重试。")
     new_class_input = st.text_input("➕ 添加班级：", placeholder="例如：万达K12班")
     if st.button("添加班级", use_container_width=True):
         if new_class_input and new_class_input not in st.session_state.class_rules:
@@ -556,7 +579,9 @@ with st.sidebar:
 
     if btn_generate:
         st.session_state.btn_clicked = True
-        save_user_data_to_cloud(show_toast=False)
+        # An empty screen must never overwrite previously saved class mappings.
+        if st.session_state.class_rules or st.session_state.name_maps:
+            save_user_data_to_cloud(show_toast=False)
         st.rerun()
 
 if st.session_state.btn_clicked:
