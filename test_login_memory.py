@@ -103,6 +103,40 @@ class LoginFlowTests(unittest.TestCase):
         self.assertEqual(self.login.call_count, 1)
         self.assertGreater(self.report.call_count, 0)
 
+    def test_slow_browser_restore_survives_entering_same_phone_and_checking_remember(self):
+        self.use_config_cloud()
+        self.sign_in()
+        saved = copy.deepcopy(self.browser.saved)
+        ready = False
+
+        def delayed_component(**kwargs):
+            if kwargs["action"] == "load" and not ready:
+                return None
+            return self.browser(**kwargs)
+
+        with patch("streamlit.components.v1.declare_component", return_value=delayed_component):
+            app = self.app()
+            app.text_input("input_username_widget").set_value("test-teacher").run()
+            app.checkbox("remember_login").check().run()
+            self.assertEqual(self.browser.saved, saved)
+            ready = True
+            app.run()
+            self.assertEqual(app.session_state.token, saved["token"])
+            self.assertTrue(app.session_state.login_authenticated)
+            self.click(app, "⚡ 一键生成打卡报告")
+            self.assertGreater(self.report.call_count, 0)
+            self.assertEqual(self.login.call_count, 1)
+
+            ready = False
+            switched = self.app()
+            switched.text_input("input_username_widget").set_value("another-teacher").run()
+            switched.checkbox("remember_login").check().run()
+            ready = True
+            switched.run()
+            self.assertEqual(switched.session_state.token, "")
+            self.assertFalse(switched.session_state.login_authenticated)
+            self.assertIsNone(self.browser.saved)
+
     def test_remember_is_opt_in_and_unchecking_forgets_future_sessions(self):
         self.sign_in(remember=False)
         self.assertIsNone(self.browser.saved)

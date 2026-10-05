@@ -35,7 +35,7 @@ if len(st.query_params) > 0:
 if "btn_clicked" not in st.session_state:
     st.session_state.btn_clicked = False
 
-sidebar_state = "collapsed" if st.session_state.btn_clicked else "expanded"
+sidebar_state = "collapsed" if st.session_state.btn_clicked and st.session_state.get("token") else "expanded"
 
 st.set_page_config(
     page_title="全阅读学情打卡生成器", 
@@ -211,7 +211,10 @@ def clear_login(clear_account=False):
 def on_username_change():
     entered_name = st.session_state.input_username_widget.strip()
     if entered_name != st.session_state.username_key:
+        restore_pending = not st.session_state.login_storage_loaded
         clear_login()
+        # Phone entry can arrive before the browser component on a slow device.
+        st.session_state.login_storage_loaded = not restore_pending
         reset_account_config()
         st.session_state.username_key = entered_name
         if entered_name:
@@ -250,8 +253,9 @@ def login_with_password():
 
 
 def on_remember_change():
-    # A deliberate choice must win over a delayed browser restore.
-    st.session_state.login_storage_loaded = True
+    # Unchecking forgets this device; checking must not cancel a pending restore.
+    if not st.session_state.remember_login:
+        st.session_state.login_storage_loaded = True
 
 
 if st.session_state.pop("clear_login_fields", False):
@@ -284,7 +288,8 @@ with st.sidebar:
         if not st.session_state.login_storage_loaded:
             st.session_state.login_storage_loaded = True
             restored = normalize_saved_login(storage_result.get("login"))
-            if restored and not st.session_state.username_key and not st.session_state.token:
+            if (restored and not st.session_state.token
+                    and st.session_state.username_key in ("", restored["username"])):
                 st.session_state.username_key = restored["username"]
                 st.session_state.input_username_widget = restored["username"]
                 st.session_state.token = restored["token"]
@@ -292,7 +297,7 @@ with st.sidebar:
                 st.session_state.login_expires_at = restored["expires_at"]
                 st.session_state.login_authenticated = True
                 st.session_state.remember_login = True
-                if restored["username"]:
+                if restored["username"] and st.session_state.cloud_sync_status["state"] in ("idle", "failed"):
                     load_user_data_from_cloud(restored["username"])
             elif storage_result.get("status") in ("expired", "invalid"):
                 st.session_state.login_notice = "本机保存的登录已过期或不可用，请重新登录。"
@@ -310,6 +315,10 @@ with st.sidebar:
     if st.session_state.login_authenticated and st.session_state.token:
         st.success("已登录，可直接生成打卡报告。")
         st.button("退出登录 / 切换账号", on_click=clear_login, args=(True,), use_container_width=True)
+    elif not st.session_state.login_storage_loaded:
+        st.info("正在读取本机保存的登录，请稍候。")
+    elif not st.session_state.token:
+        st.warning("尚未登录。请先填写密码并点击“登录”；成功后才能在本机记住登录。")
     if st.session_state.login_notice:
         getattr(st, st.session_state.login_notice_kind)(st.session_state.login_notice)
 
@@ -335,7 +344,7 @@ with st.sidebar:
 
     sync_status = st.session_state.cloud_sync_status
     if sync_status["state"] == "synced":
-        st.success(f"☁️ {sync_status['message']}")
+        st.success(f"☁️ 班级与模板配置：{sync_status['message']}")
     elif sync_status["state"] == "failed":
         st.error(f"☁️ {sync_status['message']}")
     elif sync_status["state"] == "empty":
@@ -595,7 +604,10 @@ if st.session_state.btn_clicked:
     final_token = st.session_state.token
 
     if not final_token:
-        st.warning("请先填写手机号和密码并点击“登录”，或填写 Token。")
+        if not st.session_state.login_storage_loaded:
+            st.info("正在恢复本机登录，恢复完成后会继续生成报告。")
+        else:
+            st.warning("本机没有可用的登录凭证。请在侧栏填写密码并点击“登录”，或填写 Token；云端配置保存成功不代表已登录。")
     else:
         with st.spinner("⚡ 正在抓取打卡数据并生成报告..."):
             mode_key = "matrix" if output_mode.startswith("🍓") else "traditional"
