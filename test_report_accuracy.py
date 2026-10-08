@@ -32,15 +32,16 @@ class ReportAccuracyTests(unittest.TestCase):
             self.assertEqual(details[0]["听音目标"], 30)
             self.assertIn("班级配置", details[0]["规则来源"])
             self.assertIn("Ethan", reports["万达K12"])
+            for explanation in ("本班每日目标", "规则来源", "图标从左到右", "区间汇总按"):
+                self.assertNotIn(explanation, reports["万达K12"])
         reports, _, details, _ = self.fetch([[self.student()]], rules={"万达K1": rules[" 万达Ｋ１２班 "]})
         self.assertEqual(details[0]["判断"], "部分完成")
-        self.assertIn("默认规则", reports["万达K12"])
+        self.assertIn("默认规则", details[0]["规则来源"])
 
     def test_missing_day_does_not_shift_later_icons(self):
         reports, error, details, request = self.fetch([[], [self.student(listen=60, animation=15)], [self.student(listen=1)]])
         self.assertIsNone(error)
         self.assertIn("❌🏆🥇  Ethan", reports["万达K12"])
-        self.assertIn("10.05、10.06、10.07", reports["万达K12"])
         self.assertEqual([c.kwargs["params"]["start"] for c in request.call_args_list[1:]], ["2026-10-05", "2026-10-06", "2026-10-07"])
 
     def test_partial_every_day_is_not_full_attendance(self):

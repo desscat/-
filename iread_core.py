@@ -200,7 +200,6 @@ def fetch_data_via_api(auth_token, report_type, start_date, end_date, class_rule
             if not class_id:
                 raise ValueError("接口缺少班级编号，已停止生成")
             rule, mapping, source = class_config(class_name, class_rules_config, name_maps_config, default_rule)
-            target_text = f"本班每日目标：听音{rule['listen']:g}分钟，动画{rule['anim']:g}分钟，分级绘本{rule['books']:g}本\n规则来源：{source}"
             students = {}
             glory, effort, zero = [], [], []
             ranges = [(day, day) for day in dates] if mode == "matrix" else [(dates[0], dates[-1])]
@@ -266,8 +265,7 @@ def fetch_data_via_api(auth_token, report_type, start_date, end_date, class_rule
                     matrix="\n".join(lines) if lines else "（暂无打卡数据）", total_students=total,
                     full_attendance_count=full_count, attendance_rate=attendance_rate, stats=stats,
                 )
-                date_header = "图标从左到右：" + "、".join((start_date + timedelta(days=i)).strftime("%m.%d") for i in range(days))
-                reports[class_name] = target_text + "\n" + date_header + "\n\n" + content
+                reports[class_name] = content
             else:
                 template = template_str if "{glory_list}" in template_str else DEFAULT_TEMPLATE
                 content = template.format(
@@ -275,7 +273,7 @@ def fetch_data_via_api(auth_token, report_type, start_date, end_date, class_rule
                     glory_list="\n".join(glory) if glory else "无", effort_list="\n".join(effort) if effort else "无",
                     zero_list="\n".join(zero) if zero else "无",
                 )
-                reports[class_name] = target_text + "\n区间汇总按每日目标 × 天数判断。\n\n" + content
+                reports[class_name] = content
         return reports, None
     except Exception as error:
         traceback.print_exc()
