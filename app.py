@@ -65,6 +65,7 @@ if "class_rules" not in st.session_state:
     st.session_state.class_rules = {}
 if "name_maps" not in st.session_state:
     st.session_state.name_maps = {}
+st.session_state.setdefault("english_only", False)
 if "custom_template" not in st.session_state:
     st.session_state.custom_template = DEFAULT_TEMPLATE
 if "matrix_template" not in st.session_state:
@@ -122,6 +123,7 @@ def load_user_data_from_cloud(username: str):
                     st.session_state.pop(f"{prefix}_{class_name}", None)
             st.session_state.class_rules = data.get("class_rules", {})
             st.session_state.name_maps = data.get("name_maps", {})
+            st.session_state.english_only = data.get("english_only", False) is True
             st.session_state.custom_template = data.get("custom_template", DEFAULT_TEMPLATE)
             st.session_state.matrix_template = data.get("matrix_template", DEFAULT_MATRIX_TEMPLATE)
             st.session_state.emojis = normalize_emoji_config(data.get("emojis", DEFAULT_EMOJIS))
@@ -161,6 +163,7 @@ def save_user_data_to_cloud(show_toast=True):
     payload_data = {
         "class_rules": st.session_state.class_rules,
         "name_maps": st.session_state.name_maps,
+        "english_only": st.session_state.english_only,
         "custom_template": st.session_state.custom_template,
         "matrix_template": st.session_state.matrix_template,
         "emojis": st.session_state.emojis,
@@ -187,6 +190,7 @@ def reset_account_config():
             st.session_state.pop(f"{prefix}_{class_name}", None)
     st.session_state.class_rules = {}
     st.session_state.name_maps = {}
+    st.session_state.english_only = False
     st.session_state.custom_template = DEFAULT_TEMPLATE
     st.session_state.matrix_template = DEFAULT_MATRIX_TEMPLATE
     st.session_state.emojis = DEFAULT_EMOJIS.copy()
@@ -399,8 +403,14 @@ with st.sidebar:
             start_date = st.date_input("开始日期", value=calc_start_date)
             end_date = st.date_input("结束日期", value=calc_end_date)
 
-    st.subheader("3. 🎨 DIY 格式与 Emoji 主题")
-    with st.expander("✨ 点击展开/修改模板与 Emoji 主题", expanded=False):
+    st.subheader("3. 🎨 个性化输出")
+    with st.expander("✨ 点击展开/修改姓名、模板与 Emoji 主题", expanded=False):
+        st.checkbox(
+            "报告仅显示英文名", key="english_only",
+            on_change=save_user_data_to_cloud, args=(False,),
+            help="优先使用姓名映射中的英文名，其次从平台姓名提取；缺少英文名时保留原名，可在姓名映射中补充。只改变报告显示，不影响打卡判断。",
+        )
+        st.caption("姓名选项默认关闭；云端配置加载成功后，修改此选项会自动保存到当前老师账号。")
         if output_mode == "🍓 矩阵式周打卡榜":
             preset_options = list(EMOJI_PRESETS.keys()) + [
                 name for name in st.session_state.emoji_presets
@@ -622,7 +632,8 @@ if st.session_state.btn_clicked:
             reports, err = fetch_data_via_api(
                 final_token, report_type, start_date, end_date, 
                 class_rules_config, name_maps_config, DEFAULT_RULE, 
-                curr_tmpl, mode=mode_key, emoji_config=st.session_state.emojis, diagnostics=diagnostics
+                curr_tmpl, mode=mode_key, emoji_config=st.session_state.emojis, diagnostics=diagnostics,
+                english_only=st.session_state.english_only
             )
             if diagnostics:
                 with st.expander("🔎 核对抓取数据与达标依据"):

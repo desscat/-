@@ -134,10 +134,16 @@ def fetch_statistics(token, class_id, start, end):
     return rows
 
 
-def format_student_name(raw_name, eng_name):
+def format_student_name(raw_name, eng_name, english_only=False):
     if not raw_name:
         return ""
     raw_name = str(raw_name).strip()
+    if english_only:
+        for candidate in (eng_name, raw_name):
+            parts = re.findall(r"[A-Za-z]+(?:[ '’-][A-Za-z]+)*", unicodedata.normalize("NFKC", str(candidate or "")))
+            if parts:
+                return " ".join(parts)
+        return raw_name
     if not eng_name:
         return raw_name
     eng_name = str(eng_name).strip()
@@ -165,7 +171,7 @@ def auto_login(username, password):
     except Exception as e:
         return None, str(e)
 
-def fetch_data_via_api(auth_token, report_type, start_date, end_date, class_rules_config, name_maps_config, default_rule, template_str, mode="traditional", emoji_config=None, diagnostics=None):
+def fetch_data_via_api(auth_token, report_type, start_date, end_date, class_rules_config, name_maps_config, default_rule, template_str, mode="traditional", emoji_config=None, diagnostics=None, english_only=False):
     if emoji_config is None:
         emoji_config = {"full": "🍓", "part": "✅", "zero": "🚫", "badge": "✔️"}
     if diagnostics is not None:
@@ -216,7 +222,7 @@ def fetch_data_via_api(auth_token, report_type, start_date, end_date, class_rule
                         raise ValueError(f"班级“{class_name}”有重复学生记录，已停止生成")
                     seen.add(student_id)
                     chinese_name = re.sub(r"[a-zA-Z\s]", "", raw_name)
-                    display_name = format_student_name(raw_name, mapping.get(chinese_name, mapping.get(raw_name, "")))
+                    display_name = format_student_name(raw_name, mapping.get(chinese_name, mapping.get(raw_name, "")), english_only=english_only)
                     amounts, raw = student_metrics(student)
                     multiplier = 1 if mode == "matrix" else days
                     targets = [rule[key] * multiplier for key in ("listen", "anim", "books")]

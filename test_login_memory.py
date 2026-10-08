@@ -224,6 +224,31 @@ class LoginFlowTests(unittest.TestCase):
         self.click(app, "⚡ 一键生成打卡报告")
         self.assertEqual(json.loads(cloud.writes[-1]["config_json"])["name_maps"], cloud.config["name_maps"])
 
+    def test_english_name_preference_is_saved_restored_and_isolated_by_account(self):
+        cloud = self.use_config_cloud()
+        app = self.sign_in()
+        self.assertFalse(app.checkbox("english_only").value)
+        app.checkbox("english_only").check().run()
+        self.assertFalse(app.exception)
+        saved = json.loads(cloud.writes[-1]["config_json"])
+        self.assertTrue(saved["english_only"])
+        self.assertEqual(saved["class_rules"], cloud.config["class_rules"])
+        self.assertEqual(saved["name_maps"], cloud.config["name_maps"])
+        self.click(app, "⚡ 一键生成打卡报告")
+        self.assertTrue(self.report.call_args.kwargs["english_only"])
+        cloud.config = saved
+        restored = self.app()
+        self.assertTrue(restored.checkbox("english_only").value)
+        restored.checkbox("english_only").uncheck().run()
+        self.assertFalse(json.loads(cloud.writes[-1]["config_json"])["english_only"])
+        self.click(restored, "🔄 重新加载云端配置")
+        self.assertTrue(restored.checkbox("english_only").value)
+        cloud.config = {}
+        restored.text_input("input_username_widget").set_value("another-teacher").run()
+        self.assertFalse(restored.exception)
+        self.assertFalse(restored.checkbox("english_only").value)
+        self.assertEqual(restored.session_state.class_rules, {})
+
     def test_generation_does_not_auto_save_empty_configuration(self):
         cloud = self.use_config_cloud()
         cloud.config = {}

@@ -2,11 +2,11 @@ import unittest
 from datetime import date
 from unittest.mock import Mock, patch
 
-from iread_core import DEFAULT_MATRIX_TEMPLATE, DEFAULT_RULE, DEFAULT_TEMPLATE, clean_num, duration_minutes, fetch_data_via_api
+from iread_core import DEFAULT_MATRIX_TEMPLATE, DEFAULT_RULE, DEFAULT_TEMPLATE, clean_num, duration_minutes, fetch_data_via_api, format_student_name
 
 
 class ReportAccuracyTests(unittest.TestCase):
-    def fetch(self, daily_rows, *, mode="matrix", rules=None, class_name="万达K12", start=date(2026, 10, 5), end=None):
+    def fetch(self, daily_rows, *, mode="matrix", rules=None, name_maps=None, english_only=False, class_name="万达K12", start=date(2026, 10, 5), end=None):
         if end is None:
             end = date(2026, 10, 5 + len(daily_rows) - 1)
         classes = Mock(status_code=200, json=lambda: {"data": [{"id": 12, "name": class_name}]})
@@ -14,9 +14,9 @@ class ReportAccuracyTests(unittest.TestCase):
         details = []
         with patch("iread_core.requests.get", side_effect=responses) as requests:
             reports, error = fetch_data_via_api(
-                "test-token", "周汇报", start, end, rules or {}, {}, DEFAULT_RULE,
+                "test-token", "周汇报", start, end, rules or {}, name_maps or {}, DEFAULT_RULE,
                 DEFAULT_MATRIX_TEMPLATE if mode == "matrix" else DEFAULT_TEMPLATE,
-                mode=mode, emoji_config={"full": "🏆", "part": "🥇", "zero": "❌", "badge": "🎖️"}, diagnostics=details,
+                mode=mode, emoji_config={"full": "🏆", "part": "🥇", "zero": "❌", "badge": "🎖️"}, diagnostics=details, english_only=english_only,
             )
         return reports, error, details, requests
 
@@ -98,6 +98,33 @@ class ReportAccuracyTests(unittest.TestCase):
         self.assertIsNone(reports)
         self.assertIn("日期", error)
         requests.assert_not_called()
+
+    def test_english_names_change_only_display_in_both_report_modes(self):
+        rows = [
+            self.student(id=1, name="王小明", listen=60, animation=15),
+            self.student(id=2, name="李佳Ethan", listen=60, animation=15),
+            self.student(id=3, name="刘Anne-Marie", listen=1),
+            self.student(id=4, name="张小红", listen=0, animation=0, grading=0),
+            self.student(id=5, name="吴O'Neil"),
+        ]
+        mapping = {"万达K12": "王小明:Ethan"}
+        for mode in ("matrix", "traditional"):
+            original, error, details, requests = self.fetch([rows], mode=mode, name_maps=mapping)
+            personalized, new_error, new_details, new_requests = self.fetch([rows], mode=mode, name_maps=mapping, english_only=True)
+            self.assertIsNone(error)
+            self.assertIsNone(new_error)
+            expected = original["万达K12"]
+            for old, new in (("王小明(Ethan)", "Ethan"), ("李佳Ethan", "Ethan"), ("刘Anne-Marie", "Anne-Marie"), ("吴O'Neil", "O'Neil")):
+                expected = expected.replace(old, new)
+            self.assertEqual(personalized["万达K12"], expected)
+            self.assertEqual(requests.call_args_list, new_requests.call_args_list)
+            self.assertEqual(
+                [{key: value for key, value in row.items() if key != "学生"} for row in details],
+                [{key: value for key, value in row.items() if key != "学生"} for row in new_details],
+            )
+            self.assertEqual([row["学生"] for row in new_details], ["Ethan", "Ethan", "Anne-Marie", "张小红", "O'Neil"])
+        self.assertEqual(format_student_name("陈同学", "  John Smith  ", english_only=True), "John Smith")
+        self.assertEqual(format_student_name("李Ｅｔｈａｎ", "", english_only=True), "Ethan")
 
     def test_app_displays_verification_details(self):
         import sys
