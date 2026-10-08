@@ -1,6 +1,8 @@
 import re
 import requests
 import traceback
+import math
+import unicodedata
 from datetime import date, timedelta
 
 AUTH_EXPIRED_MESSAGE = "登录已过期，请重新登录。"
@@ -40,11 +42,97 @@ def parse_name_map(map_str):
             mapping[key.strip()] = val.strip()
     return mapping
 
-def clean_num(text):
-    if text is None:
-        return 0
-    nums = re.findall(r'\d+', str(text))
-    return int(nums[0]) if nums else 0
+DEFAULT_RULE = {"listen": 60, "anim": 15, "books": 2}
+
+
+def clean_num(value):
+    """Read a number without truncating decimals or treating malformed data as zero."""
+    if value is None or value == "":
+        return 0.0
+    text = str(value).strip()
+    if not re.fullmatch(r"\d+(?:\.\d+)?(?:本|次)?", text):
+        raise ValueError(f"无法识别的数据数值：{text}")
+    number = float(re.match(r"\d+(?:\.\d+)?", text)[0])
+    if not math.isfinite(number):
+        raise ValueError("数据数值不可用")
+    return number
+
+
+def duration_minutes(value):
+    text = str(value).strip() if value is not None else ""
+    if not text or re.fullmatch(r"\d+(?:\.\d+)?", text):
+        return clean_num(value)
+    pattern = r"(\d+(?:\.\d+)?)\s*(小时|分钟|分|秒|h|min|s)"
+    parts = re.findall(pattern, text)
+    if not parts or re.sub(pattern, "", text).strip():
+        raise ValueError(f"无法识别时长单位：{text}")
+    factors = {"小时": 60, "h": 60, "分钟": 1, "分": 1, "min": 1, "秒": 1 / 60, "s": 1 / 60}
+    return sum(clean_num(number) * factors[unit] for number, unit in parts)
+
+
+def student_metrics(student):
+    values = []
+    raw = []
+    for keys, parser in (
+        (("listen", "audio_time", "listenTime"), duration_minutes),
+        (("animation", "anim", "animTime"), duration_minutes),
+        (("grading", "booksCount"), clean_num),
+    ):
+        key = next((key for key in keys if key in student), None)
+        if key is None:
+            raise ValueError(f"接口缺少 {keys[0]} 字段，已停止生成，避免误判")
+        raw.append(student[key])
+        values.append(parser(student[key]))
+    # The platform's read field is extracurricular reading, not grading homework.
+    if values[2] != int(values[2]):
+        raise ValueError("分级作业数量不是整数，已停止生成")
+    return values, raw
+
+
+def class_config(class_name, rules, mappings, default_rule):
+    def normalized(name):
+        text = re.sub(r"\s+", "", unicodedata.normalize("NFKC", name)).casefold()
+        return text[:-1] if text.endswith("班") else text
+
+    key = class_name if class_name in rules else None
+    if key is None:
+        matches = [name for name in rules if normalized(name) == normalized(class_name)]
+        if len(matches) > 1:
+            raise ValueError(f"班级“{class_name}”匹配到多条配置，请统一班级名称")
+        key = matches[0] if matches else None
+    rule = rules[key] if key is not None else default_rule
+    if not isinstance(rule, dict) or any(k not in rule for k in DEFAULT_RULE):
+        raise ValueError(f"班级“{class_name}”的目标配置不完整")
+    for k in DEFAULT_RULE:
+        if isinstance(rule[k], bool) or not isinstance(rule[k], (int, float)) or not math.isfinite(rule[k]) or rule[k] < 0:
+            raise ValueError(f"班级“{class_name}”的目标配置无效")
+    source = f"班级配置：{key}" if key is not None else "默认规则（未匹配到班级配置）"
+    mapping = mappings.get(class_name, mappings.get(key, ""))
+    return rule, parse_name_map(mapping), source
+
+
+def fetch_statistics(token, class_id, start, end):
+    response = requests.get(
+        f"https://v2.ireadabc.com/api/v3/reports/statistics/class/{class_id}",
+        headers={"Token": token, "Client-Type": "BROWSER", "User-Agent": "Mozilla/5.0"},
+        params={"start": start, "end": end}, timeout=15,
+    )
+    if response.status_code in (401, 403):
+        raise ValueError(AUTH_EXPIRED_MESSAGE)
+    if response.status_code != 200:
+        raise ValueError(f"班级 {class_id} 在 {start} 至 {end} 的数据请求失败（{response.status_code}），已停止生成")
+    payload = response.json()
+    if isinstance(payload, dict) and payload.get("code") in (401, 403, "401", "403"):
+        raise ValueError(AUTH_EXPIRED_MESSAGE)
+    if isinstance(payload, dict) and payload.get("code") not in (None, 0, 200, "0", "200"):
+        raise ValueError("平台返回数据错误，已停止生成")
+    rows = payload.get("data", payload) if isinstance(payload, dict) else payload
+    if isinstance(rows, dict):
+        rows = next((rows[k] for k in ("students", "rows", "list") if k in rows), None)
+    if not isinstance(rows, list) or any(not isinstance(row, dict) for row in rows):
+        raise ValueError("平台数据格式无法识别，已停止生成")
+    return rows
+
 
 def format_student_name(raw_name, eng_name):
     if not raw_name:
@@ -77,249 +165,118 @@ def auto_login(username, password):
     except Exception as e:
         return None, str(e)
 
-def fetch_data_via_api(auth_token, report_type, start_date, end_date, class_rules_config, name_maps_config, default_rule, template_str, mode="traditional", emoji_config=None):
+def fetch_data_via_api(auth_token, report_type, start_date, end_date, class_rules_config, name_maps_config, default_rule, template_str, mode="traditional", emoji_config=None, diagnostics=None):
     if emoji_config is None:
         emoji_config = {"full": "🍓", "part": "✅", "zero": "🚫", "badge": "✔️"}
-
-    clean_token = auth_token.strip()
-    
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36",
-        "Token": clean_token,
-        "Client-Type": "BROWSER"
-    }
-
-    classes_url = "https://v2.ireadabc.com/api/teacher/classes/page/all"
-    
+    if diagnostics is not None:
+        diagnostics.clear()
+    if end_date < start_date:
+        return None, "结束日期不能早于开始日期"
+    token = auth_token.strip()
     try:
-        resp = requests.get(classes_url, headers=headers, timeout=15)
-        if resp.status_code in (401, 403):
+        response = requests.get(
+            "https://v2.ireadabc.com/api/teacher/classes/page/all",
+            headers={"Token": token, "Client-Type": "BROWSER", "User-Agent": "Mozilla/5.0"}, timeout=15,
+        )
+        if response.status_code in (401, 403):
             return None, AUTH_EXPIRED_MESSAGE
-        if resp.status_code != 200:
-            return None, f"请求班级列表失败 (状态码: {resp.status_code})"
-            
-        res_json = resp.json()
-        if isinstance(res_json, dict) and res_json.get("code") in (401, 403, "401", "403"):
+        if response.status_code != 200:
+            return None, f"请求班级列表失败 (状态码: {response.status_code})"
+        payload = response.json()
+        if isinstance(payload, dict) and payload.get("code") in (401, 403, "401", "403"):
             return None, AUTH_EXPIRED_MESSAGE
-        raw_data = res_json.get("data", [])
-        
-        classes_data = []
-        if isinstance(raw_data, dict):
-            classes_data = raw_data.get("rows", []) or raw_data.get("list", []) or raw_data.get("classes", [])
-        elif isinstance(raw_data, list):
-            classes_data = raw_data
-            
-        if not classes_data and isinstance(res_json, list):
-            classes_data = res_json
+        classes = payload.get("data", payload) if isinstance(payload, dict) else payload
+        if isinstance(classes, dict):
+            classes = next((classes[k] for k in ("rows", "list", "classes") if k in classes), [])
+        if not isinstance(classes, list) or not classes:
+            return None, "未能获取到班级列表，请确认登录及接口数据"
 
-        if not classes_data:
-            return None, "未能获取到班级列表，请确认 Token 是否正确"
-
-    except Exception as e:
-        traceback.print_exc()
-        return None, f"请求班级列表异常: {str(e)}"
-
-    reports_dict = {}
-
-    try:
-        # 📅 矩阵日历模式
-        if mode == "matrix":
-            days_to_fetch = max(1, (end_date - start_date).days + 1)
-            date_title = f"{start_date.month}.{start_date.day}--{end_date.month}.{end_date.day}"
-
-            for item in classes_data:
-                class_id = str(item.get("id") or item.get("class_id") or item.get("classId"))
-                class_name = item.get("class_name") or item.get("name") or item.get("className") or f"班级_{class_id}"
-                
-                base_rule = class_rules_config.get(class_name, default_rule)
-                matched_map = name_maps_config.get(class_name, "")
-                class_mapping = parse_name_map(matched_map)
-
-                all_days_students_map = {}
-
-                # 按天严格遍历从 start_date 到 end_date
-                for day_idx in range(days_to_fetch):
-                    curr_date = (start_date + timedelta(days=day_idx)).strftime("%Y-%m-%d")
-                    stats_url = f"https://v2.ireadabc.com/api/v3/reports/statistics/class/{class_id}"
-                    
-                    stat_resp = requests.get(stats_url, headers=headers, params={"start": curr_date, "end": curr_date}, timeout=15)
-                    if stat_resp.status_code in (401, 403):
-                        return None, AUTH_EXPIRED_MESSAGE
-                    if stat_resp.status_code == 200:
-                        s_json = stat_resp.json()
-                        students_raw = s_json.get("data", []) if isinstance(s_json, dict) else s_json
-                        if isinstance(students_raw, dict):
-                            students_raw = students_raw.get("rows", []) or students_raw.get("students", []) or students_raw.get("list", [])
-
-                        for s in students_raw:
-                            raw_name = s.get("name") or s.get("student_name") or s.get("studentName") or ""
-                            if not raw_name:
-                                continue
-                            clean_n = re.sub(r'[a-zA-Z\s]', '', raw_name)
-                            eng_name = class_mapping.get(clean_n, class_mapping.get(raw_name, ""))
-                            display_name = format_student_name(raw_name, eng_name)
-
-                            if display_name not in all_days_students_map:
-                                all_days_students_map[display_name] = []
-
-                            listen = clean_num(s.get("listen") or s.get("audio_time") or s.get("listenTime") or 0)
-                            anim = clean_num(s.get("animation") or s.get("anim") or s.get("animTime") or 0)
-                            books = clean_num(s.get("grading") or s.get("read") or s.get("booksCount") or 0)
-
-                            if listen >= base_rule["listen"] and anim >= base_rule["anim"] and books >= base_rule["books"]:
-                                emoji = emoji_config.get("full", "🍓")
-                            elif listen == 0 and anim == 0 and books == 0:
-                                emoji = emoji_config.get("zero", "🚫")
-                            else:
-                                emoji = emoji_config.get("part", "✅")
-                            
-                            all_days_students_map[display_name].append(emoji)
-
-                matrix_lines = []
-                total_students = len(all_days_students_map)
-                full_attendance_count = 0  
-                effort_count = 0           
-                zero_attendance_count = 0  
-
-                full_icon = emoji_config.get("full", "🍓")
-                part_icon = emoji_config.get("part", "✅")
-                zero_icon = emoji_config.get("zero", "🚫")
-
-                for s_name, emojis in all_days_students_map.items():
-                    while len(emojis) < days_to_fetch:
-                        emojis.append(zero_icon)
-                        
-                    line = f"{''.join(emojis)}  {s_name}"
-                    
-                    full_count_in_row = emojis.count(full_icon)
-                    part_count_in_row = emojis.count(part_icon)
-                    zero_count_in_row = emojis.count(zero_icon)
-                    
-                    # 💡 严谨判定逻辑：
-                    # 1. 未打卡提醒：完全没打卡（全都是 zero_icon）
-                    if zero_count_in_row == days_to_fetch:
-                        zero_attendance_count += 1
-                    # 2. 全勤达标：每天都有打卡（没有一天是 zero_icon）
-                    elif zero_count_in_row == 0:
-                        full_attendance_count += 1
-                        
-                        # 💡 核心修复：只有当“每一天都完全满分（full_count 等于总天数）”时，才加奖杯！
-                        # 如果中间有一天是部分完成（part_icon），哪怕天天打卡，也不会被加上这个奖杯。
-                        if full_count_in_row == days_to_fetch and emoji_config.get("badge"):
-                            line += f" {emoji_config.get('badge')}"
-                    # 3. 持续加油：有打卡也有没打卡（夹杂着 zero_icon）
-                    else:
-                        effort_count += 1
-
-                    matrix_lines.append(line)
-
-                attendance_rate = round((full_attendance_count / total_students * 100), 1) if total_students > 0 else 0.0
-
-                stats_text = f"""📊 学情统计汇总：
-🏆 全勤达标：{full_attendance_count} 人 ({attendance_rate}%)
-💪 持续加油：{effort_count} 人
-⚠️ 未打卡提醒：{zero_attendance_count} 人"""
-
-                if "{stats}" in template_str:
-                    curr_matrix_template = template_str
-                else:
-                    curr_matrix_template = template_str + "\n\n--------------------\n{stats}"
-
-                reports_dict[class_name] = curr_matrix_template.format(
-                    date_title=date_title,
-                    matrix="\n".join(matrix_lines) if matrix_lines else "（暂无打卡数据）",
-                    total_students=total_students,
-                    full_attendance_count=full_attendance_count,
-                    attendance_rate=attendance_rate,
-                    stats=stats_text 
-                )
-
-            return reports_dict, None
-
-        # 📋 传统文字分组模式
-        s_date, e_date = start_date.strftime("%Y-%m-%d"), end_date.strftime("%Y-%m-%d")
-        days_count = max(1, (end_date - start_date).days + 1)
-        
-        if s_date == e_date:
-            date_title = start_date.strftime("%m月%d日")
-        else:
-            date_title = f"{s_date}至{e_date}"
-
-        for item in classes_data:
-            class_id = str(item.get("id") or item.get("class_id") or item.get("classId"))
+        days = (end_date - start_date).days + 1
+        dates = [(start_date + timedelta(days=i)).isoformat() for i in range(days)]
+        reports = {}
+        for item in classes:
+            class_id = str(item.get("id") or item.get("class_id") or item.get("classId") or "")
             class_name = item.get("class_name") or item.get("name") or item.get("className") or f"班级_{class_id}"
-            
-            base_rule = class_rules_config.get(class_name, default_rule)
-            matched_rule = {k: v * days_count for k, v in base_rule.items()}
-            matched_map = name_maps_config.get(class_name, "")
-            class_mapping = parse_name_map(matched_map)
-
-            stats_url = f"https://v2.ireadabc.com/api/v3/reports/statistics/class/{class_id}"
-            stat_resp = requests.get(stats_url, headers=headers, params={"start": s_date, "end": e_date}, timeout=15)
-            if stat_resp.status_code in (401, 403):
-                return None, AUTH_EXPIRED_MESSAGE
-
-            if stat_resp.status_code == 200:
-                s_json = stat_resp.json()
-                students_raw = s_json.get("data", []) if isinstance(s_json, dict) else s_json
-                if isinstance(students_raw, dict):
-                    students_raw = students_raw.get("rows", []) or students_raw.get("students", []) or students_raw.get("list", [])
-
-                glory_lines = []
-                effort_lines = []
-                zero_lines = []
-
-                for s in students_raw:
-                    raw_name = s.get("name") or s.get("student_name") or s.get("studentName") or ""
-                    if not raw_name:
-                        continue
-                    clean_n = re.sub(r'[a-zA-Z\s]', '', raw_name)
-                    eng_name = class_mapping.get(clean_n, class_mapping.get(raw_name, ""))
-                    display_name = format_student_name(raw_name, eng_name)
-
-                    listen = clean_num(s.get("listen") or s.get("audio_time") or s.get("listenTime") or 0)
-                    anim = clean_num(s.get("animation") or s.get("anim") or s.get("animTime") or 0)
-                    books = clean_num(s.get("grading") or s.get("read") or s.get("booksCount") or 0)
-
-                    target_l = matched_rule["listen"]
-                    target_a = matched_rule["anim"]
-                    target_b = matched_rule["books"]
-
-                    is_listen = listen >= target_l
-                    is_anim = anim >= target_a
-                    is_books = books >= target_b
-
-                    # 完全达标 -> 🌟 【今日光荣榜】
-                    if is_listen and is_anim and is_books:
-                        glory_lines.append(f"{display_name} (听音{listen}min, 动画{anim}min, 绘本{books}本)")
-                    # 完全没打卡 -> ⏰ 【该起床打卡啦】
-                    elif listen == 0 and anim == 0 and books == 0:
-                        zero_lines.append(display_name)
-                    # 部分达标 -> 💪 【再努努力】
+            if not class_id:
+                raise ValueError("接口缺少班级编号，已停止生成")
+            rule, mapping, source = class_config(class_name, class_rules_config, name_maps_config, default_rule)
+            target_text = f"本班每日目标：听音{rule['listen']:g}分钟，动画{rule['anim']:g}分钟，分级绘本{rule['books']:g}本\n规则来源：{source}"
+            students = {}
+            glory, effort, zero = [], [], []
+            ranges = [(day, day) for day in dates] if mode == "matrix" else [(dates[0], dates[-1])]
+            for day_index, (first, last) in enumerate(ranges):
+                rows = fetch_statistics(token, class_id, first, last)
+                seen = set()
+                for student in rows:
+                    raw_name = student.get("name") or student.get("student_name") or student.get("studentName")
+                    if not isinstance(raw_name, str) or not raw_name.strip():
+                        raise ValueError("学生数据缺少姓名，已停止生成")
+                    raw_name = raw_name.strip()
+                    student_id = str(student.get("id") or student.get("student_id") or student.get("studentId") or raw_name)
+                    if student_id in seen:
+                        raise ValueError(f"班级“{class_name}”有重复学生记录，已停止生成")
+                    seen.add(student_id)
+                    chinese_name = re.sub(r"[a-zA-Z\s]", "", raw_name)
+                    display_name = format_student_name(raw_name, mapping.get(chinese_name, mapping.get(raw_name, "")))
+                    amounts, raw = student_metrics(student)
+                    multiplier = 1 if mode == "matrix" else days
+                    targets = [rule[key] * multiplier for key in ("listen", "anim", "books")]
+                    missing = [f"{label}还缺{target - amount:g}{unit}" for label, unit, amount, target in zip(
+                        ("听音", "动画", "分级绘本"), ("分钟", "分钟", "本"), amounts, targets,
+                    ) if amount < target]
+                    status = "full" if not missing else "zero" if not any(amounts) else "part"
+                    if diagnostics is not None:
+                        diagnostics.append({
+                            "班级": class_name, "日期": first if first == last else f"{first}至{last}",
+                            "学生": display_name, "规则来源": source,
+                            "听音原始": str(raw[0]), "听音分钟": amounts[0], "听音目标": targets[0],
+                            "动画原始": str(raw[1]), "动画分钟": amounts[1], "动画目标": targets[1],
+                            "分级原始": str(raw[2]), "分级本数": amounts[2], "分级目标": targets[2],
+                            "判断": {"full": "全部达标", "part": "部分完成", "zero": "未打卡"}[status],
+                            "未达标原因": "；".join(missing),
+                        })
+                    if mode == "matrix":
+                        record = students.setdefault(student_id, {"name": display_name, "statuses": ["zero"] * days})
+                        record["statuses"][day_index] = status
+                    elif status == "full":
+                        glory.append(f"{display_name} (听音{amounts[0]:g}min, 动画{amounts[1]:g}min, 绘本{amounts[2]:g}本)")
+                    elif status == "zero":
+                        zero.append(display_name)
                     else:
-                        diffs = []
-                        if not is_listen:
-                            diffs.append(f"听音还缺{target_l - listen}min")
-                        if not is_anim:
-                            diffs.append(f"动画还缺{target_a - anim}min")
-                        if not is_books:
-                            diffs.append(f"绘本还缺{target_b - books}本")
-                        
-                        diff_str = ", ".join(diffs)
-                        effort_lines.append(f"{display_name}：已达标 (距离全勤还缺：{diff_str})")
+                        effort.append(f"{display_name}：部分完成（{'，'.join(missing)}）")
 
-                curr_traditional_template = template_str if "{glory_list}" in template_str else DEFAULT_TEMPLATE
-
-                reports_dict[class_name] = curr_traditional_template.format(
-                    class_name=class_name,
-                    date_title=date_title,
-                    glory_list="\n".join(glory_lines) if glory_lines else "无",
-                    effort_list="\n".join(effort_lines) if effort_lines else "无",
-                    zero_list="\n".join(zero_lines) if zero_lines else "无"
+            if mode == "matrix":
+                lines = []
+                full_count = zero_count = 0
+                for record in students.values():
+                    statuses = record["statuses"]
+                    full = all(status == "full" for status in statuses)
+                    full_count += full
+                    zero_count += all(status == "zero" for status in statuses)
+                    line = f"{''.join(emoji_config[status] for status in statuses)}  {record['name']}"
+                    if full and emoji_config.get("badge"):
+                        line += f" {emoji_config['badge']}"
+                    lines.append(line)
+                total = len(students)
+                attendance_rate = round(full_count / total * 100, 1) if total else 0.0
+                stats = f"📊 学情统计汇总：\n🏆 全勤达标：{full_count} 人 ({attendance_rate}%)\n💪 持续加油：{total - full_count - zero_count} 人\n⚠️ 未打卡提醒：{zero_count} 人"
+                template = template_str if "{stats}" in template_str else template_str + "\n\n--------------------\n{stats}"
+                content = template.format(
+                    class_name=class_name, date_title=f"{start_date.month}.{start_date.day}--{end_date.month}.{end_date.day}",
+                    matrix="\n".join(lines) if lines else "（暂无打卡数据）", total_students=total,
+                    full_attendance_count=full_count, attendance_rate=attendance_rate, stats=stats,
                 )
-
-        return reports_dict, None
-    except Exception as e:
+                date_header = "图标从左到右：" + "、".join((start_date + timedelta(days=i)).strftime("%m.%d") for i in range(days))
+                reports[class_name] = target_text + "\n" + date_header + "\n\n" + content
+            else:
+                template = template_str if "{glory_list}" in template_str else DEFAULT_TEMPLATE
+                content = template.format(
+                    class_name=class_name, date_title=start_date.strftime("%m月%d日") if days == 1 else f"{dates[0]}至{dates[-1]}",
+                    glory_list="\n".join(glory) if glory else "无", effort_list="\n".join(effort) if effort else "无",
+                    zero_list="\n".join(zero) if zero else "无",
+                )
+                reports[class_name] = target_text + "\n区间汇总按每日目标 × 天数判断。\n\n" + content
+        return reports, None
+    except Exception as error:
         traceback.print_exc()
-        return None, str(e)
-
+        return None, str(error)

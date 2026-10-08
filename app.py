@@ -3,7 +3,7 @@ import time
 from pathlib import Path
 import streamlit as st
 import streamlit.components.v1 as components
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from emoji_presets import (
     DEFAULT_EMOJIS,
     EMOJI_KEYS,
@@ -13,7 +13,7 @@ from emoji_presets import (
     normalize_emoji_config,
     validate_emoji_config,
 )
-from iread_core import auto_login, fetch_data_via_api, DEFAULT_TEMPLATE, DEFAULT_MATRIX_TEMPLATE, AUTH_EXPIRED_MESSAGE
+from iread_core import auto_login, fetch_data_via_api, DEFAULT_TEMPLATE, DEFAULT_MATRIX_TEMPLATE, AUTH_EXPIRED_MESSAGE, DEFAULT_RULE, class_config
 from login_memory import LOGIN_MEMORY_SECONDS, normalize_saved_login
 
 # 尝试引入 Supabase 云端数据库客户端
@@ -53,6 +53,8 @@ EMOJI_PRESETS = {
     "🚀 太空探索": {"full": "🚀", "part": "🛸", "zero": "🌑", "badge": "🌌"},
     "🏆 勋章荣誉": {"full": "🏆", "part": "🥇", "zero": "❌", "badge": "🎖️"}
 }
+
+CHINA_TZ = timezone(timedelta(hours=8))
 
 # 🛡️ 状态初始化
 if "username_key" not in st.session_state:
@@ -112,6 +114,8 @@ def load_user_data_from_cloud(username: str):
             data = json.loads(stored_config) if isinstance(stored_config, str) else stored_config
             if not isinstance(data, dict) or not isinstance(data.get("class_rules", {}), dict) or not isinstance(data.get("name_maps", {}), dict):
                 raise ValueError("云端配置格式不可用")
+            for class_name in data.get("class_rules", {}):
+                class_config(class_name, data["class_rules"], {}, DEFAULT_RULE)
             # Recreated widgets must use the loaded configuration, not stale edits.
             for class_name in set(st.session_state.class_rules) | set(data.get("class_rules", {})):
                 for prefix in ("l", "a", "b", "m"):
@@ -126,7 +130,7 @@ def load_user_data_from_cloud(username: str):
             )
             st.session_state.emoji_preset_select = "自定义"
             st.session_state.emoji_input_scope += 1
-            set_cloud_sync_status("synced", f"已从云端加载 · {datetime.now():%H:%M}")
+            set_cloud_sync_status("synced", f"已从云端加载 · {datetime.now(CHINA_TZ):%H:%M}")
             return True
         set_cloud_sync_status("empty", "云端暂无配置，首次保存后会自动建立。")
     except Exception as e:
@@ -167,7 +171,7 @@ def save_user_data_to_cloud(show_toast=True):
             "username": u_name,
             "config_json": json.dumps(payload_data, ensure_ascii=False)
         }).execute()
-        set_cloud_sync_status("synced", f"已保存到云端 · {datetime.now():%H:%M}")
+        set_cloud_sync_status("synced", f"已保存到云端 · {datetime.now(CHINA_TZ):%H:%M}")
         if show_toast:
             st.toast("☁️ 专属配置已成功保存到云端！", icon="🎉")
         return True
@@ -368,7 +372,7 @@ with st.sidebar:
     # 1. 结束日期一律锁定为「昨天」
     # 2. 如果今天是周一：昨天是周日，统计范围为【上周一 到 上周日】
     # 3. 如果今天是周二至周日：统计范围为【本周一 到 昨天】
-    today = date.today()
+    today = datetime.now(CHINA_TZ).date()
     yesterday = today - timedelta(days=1)
     
     if today.weekday() == 0:
@@ -389,7 +393,7 @@ with st.sidebar:
         elif report_type == "周汇报":
             start_date, end_date = calc_start_date, calc_end_date
         elif report_type == "月汇报":
-            start_date = today.replace(day=1)
+            start_date = yesterday.replace(day=1)
             end_date = yesterday
         else:
             start_date = st.date_input("开始日期", value=calc_start_date)
@@ -552,10 +556,11 @@ with st.sidebar:
     )
     if not st.session_state.class_rules:
         st.caption("填写原来保存配置时的老师手机号后，班级和姓名映射会从云端加载。加载失败时，可点击上方按钮重试。")
-    new_class_input = st.text_input("➕ 添加班级：", placeholder="例如：万达K12班")
+    st.caption("自定义班级目标优先；未匹配的班级使用默认 60 分钟听音、15 分钟动画、2 本分级绘本。课外阅读不计入分级绘本。")
+    new_class_input = st.text_input("➕ 添加班级：", placeholder="例如：万达K12班").strip()
     if st.button("添加班级", use_container_width=True):
         if new_class_input and new_class_input not in st.session_state.class_rules:
-            st.session_state.class_rules[new_class_input] = {"listen": 60, "anim": 15, "books": 2}
+            st.session_state.class_rules[new_class_input] = DEFAULT_RULE.copy()
             st.session_state.name_maps[new_class_input] = ""
             st.rerun()
 
@@ -570,9 +575,9 @@ with st.sidebar:
                     del st.session_state.name_maps[c_name]
                 st.rerun()
 
-            st.session_state.class_rules[c_name]["listen"] = st.number_input("每日听音(分)", value=st.session_state.class_rules[c_name]["listen"], step=5, key=f"l_{c_name}")
-            st.session_state.class_rules[c_name]["anim"] = st.number_input("每日动画(分)", value=st.session_state.class_rules[c_name]["anim"], step=5, key=f"a_{c_name}")
-            st.session_state.class_rules[c_name]["books"] = st.number_input("每日绘本(本)", value=st.session_state.class_rules[c_name]["books"], step=1, key=f"b_{c_name}")
+            st.session_state.class_rules[c_name]["listen"] = st.number_input("每日听音(分)", value=st.session_state.class_rules[c_name]["listen"], min_value=0, step=5, key=f"l_{c_name}")
+            st.session_state.class_rules[c_name]["anim"] = st.number_input("每日动画(分)", value=st.session_state.class_rules[c_name]["anim"], min_value=0, step=5, key=f"a_{c_name}")
+            st.session_state.class_rules[c_name]["books"] = st.number_input("每日分级绘本(本)", value=st.session_state.class_rules[c_name]["books"], min_value=0, step=1, key=f"b_{c_name}")
             st.session_state.name_maps[c_name] = st.text_area("姓名映射 (中文:英文)", value=st.session_state.name_maps.get(c_name, ""), key=f"m_{c_name}", height=60)
 
         class_rules_config[c_name] = st.session_state.class_rules[c_name]
@@ -613,11 +618,16 @@ if st.session_state.btn_clicked:
             mode_key = "matrix" if output_mode.startswith("🍓") else "traditional"
             curr_tmpl = st.session_state.matrix_template if mode_key == "matrix" else st.session_state.custom_template
             
+            diagnostics = []
             reports, err = fetch_data_via_api(
                 final_token, report_type, start_date, end_date, 
-                class_rules_config, name_maps_config, {"listen": 60, "anim": 15, "books": 2}, 
-                curr_tmpl, mode=mode_key, emoji_config=st.session_state.emojis
+                class_rules_config, name_maps_config, DEFAULT_RULE, 
+                curr_tmpl, mode=mode_key, emoji_config=st.session_state.emojis, diagnostics=diagnostics
             )
+            if diagnostics:
+                with st.expander("🔎 核对抓取数据与达标依据"):
+                    st.caption("查看学生原始数据、换算后的分钟数、实际使用的目标和未达标原因；抓取失败时不会继续发布不完整报告。")
+                    st.dataframe(diagnostics, use_container_width=True, hide_index=True)
             if err == AUTH_EXPIRED_MESSAGE:
                 clear_login()
                 st.session_state.login_notice = AUTH_EXPIRED_MESSAGE
